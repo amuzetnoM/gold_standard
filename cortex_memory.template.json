@@ -6,5 +6,15 @@
   "total_losses": 0,
   "last_bias": null,
   "last_price_gold": 0.0,
-  "last_update": null
+  "last_update": null,
+  "active_trades": [],
+  "closed_trades": [],
+  "total_pnl": 0.0,
+  "last_price": 0.0,
+  "trade_id_counter": 1,
+  "trailing_stop_settings": {
+    "enabled": true,
+    "activation_pct": 1.0,
+    "trail_pct": 0.5
+  }
 }

@@ -204,6 +204,7 @@ class GoldStandardGUI:
             ("weekly", "Weekly Rundown", "Short-horizon tactical weekend overview"),
             ("monthly", "Monthly Report", "Monthly performance tables + AI outlook"),
             ("yearly", "Yearly Report", "Year-over-year analysis + AI forecast"),
+            ("premarket", "Pre-Market Plan", "Daily pre-market blueprint with catalysts"),
         ]
         
         for mode_id, mode_name, mode_desc in modes:
@@ -289,7 +290,7 @@ class GoldStandardGUI:
         self.log_text.config(state=tk.DISABLED)
 
     def _build_results_dashboard(self, parent):
-        """Build the results dashboard with tabs."""
+        """Build the results dashboard with tabs grouped by function."""
         # Section title
         header = ttk.Frame(parent, style='Dark.TFrame')
         header.pack(fill=tk.X, pady=(0, 10))
@@ -300,7 +301,8 @@ class GoldStandardGUI:
         self.notebook = ttk.Notebook(parent, style='Dark.TNotebook')
         self.notebook.pack(fill=tk.BOTH, expand=True)
         
-        # Charts tab (first)
+        # === GROUP 1: ANALYSIS ===
+        # Charts tab
         charts_frame = ttk.Frame(self.notebook, style='Panel.TFrame')
         self.notebook.add(charts_frame, text="  Charts  ")
         self._build_charts_tab(charts_frame)
@@ -310,15 +312,26 @@ class GoldStandardGUI:
         self.notebook.add(reports_frame, text="  Reports  ")
         self._build_reports_tab(reports_frame)
         
-        # Preview tab
-        preview_frame = ttk.Frame(self.notebook, style='Panel.TFrame')
-        self.notebook.add(preview_frame, text="  Preview  ")
-        self._build_preview_tab(preview_frame)
-        
-        # Journal tab (persistent Cortex memory)
+        # === GROUP 2: TRADING ===
+        # Journal tab
         journal_frame = ttk.Frame(self.notebook, style='Panel.TFrame')
         self.notebook.add(journal_frame, text="  Journal  ")
         self._build_journal_tab(journal_frame)
+        
+        # Pre-Market tab (NEW)
+        premarket_frame = ttk.Frame(self.notebook, style='Panel.TFrame')
+        self.notebook.add(premarket_frame, text="  Pre-Market  ")
+        self._build_premarket_tab(premarket_frame)
+        
+        # Trades tab (NEW - Trade Simulation)
+        trades_frame = ttk.Frame(self.notebook, style='Panel.TFrame')
+        self.notebook.add(trades_frame, text="  Trades  ")
+        self._build_trades_tab(trades_frame)
+        
+        # Preview tab (moved to end)
+        preview_frame = ttk.Frame(self.notebook, style='Panel.TFrame')
+        self.notebook.add(preview_frame, text="  Preview  ")
+        self._build_preview_tab(preview_frame)
 
     def _build_reports_tab(self, parent):
         """Build the reports list tab."""
@@ -550,6 +563,271 @@ class GoldStandardGUI:
         
         self.journal_text.config(state=tk.DISABLED)
 
+    def _build_premarket_tab(self, parent):
+        """Build the Pre-Market tab for daily trading plans."""
+        # Header with generate and refresh buttons
+        header = ttk.Frame(parent, style='Panel.TFrame')
+        header.pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        ttk.Label(header, text="PRE-MARKET PLAN", style='Gold.TLabel').pack(side=tk.LEFT)
+        
+        btn_frame = ttk.Frame(header, style='Panel.TFrame')
+        btn_frame.pack(side=tk.RIGHT)
+        
+        ttk.Button(
+            btn_frame,
+            text="Generate New",
+            style='Secondary.TButton',
+            command=self._generate_premarket
+        ).pack(side=tk.LEFT, padx=(0, 5))
+        
+        ttk.Button(
+            btn_frame,
+            text="Refresh",
+            style='Secondary.TButton',
+            command=self._refresh_premarket
+        ).pack(side=tk.LEFT)
+        
+        # Pre-market content
+        self.premarket_text = scrolledtext.ScrolledText(
+            parent,
+            bg=self.colors['bg_light'],
+            fg=self.colors['text'],
+            font=('Consolas', 9),
+            relief=tk.FLAT,
+            padx=15,
+            pady=15,
+            wrap=tk.WORD
+        )
+        self.premarket_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
+        
+        # Load initial premarket
+        self._refresh_premarket()
+
+    def _get_latest_premarket_file(self):
+        """Find the most recent premarket markdown file."""
+        premarket_files = list(REPORTS_DIR.glob("premarket_*.md"))
+        if not premarket_files:
+            return None
+        premarket_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+        return premarket_files[0]
+
+    def _refresh_premarket(self):
+        """Refresh the premarket tab with latest premarket plan."""
+        self.premarket_text.config(state=tk.NORMAL)
+        self.premarket_text.delete(1.0, tk.END)
+        
+        premarket_file = self._get_latest_premarket_file()
+        if premarket_file:
+            try:
+                with open(premarket_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                self.premarket_text.insert(tk.END, f"File: {premarket_file.name}\n")
+                self.premarket_text.insert(tk.END, "=" * 50 + "\n\n")
+                self.premarket_text.insert(tk.END, content)
+            except Exception as e:
+                self.premarket_text.insert(tk.END, f"Error reading premarket plan: {e}")
+        else:
+            self.premarket_text.insert(tk.END, "No pre-market plans found.\n\n")
+            self.premarket_text.insert(tk.END, "Click 'Generate New' to create today's pre-market plan.\n")
+            self.premarket_text.insert(tk.END, "Or use: python run.py --mode premarket")
+        
+        self.premarket_text.config(state=tk.DISABLED)
+
+    def _generate_premarket(self):
+        """Generate a new premarket plan."""
+        self._log("[*] Generating Pre-Market Plan...")
+        self.run_btn.config(state=tk.DISABLED)
+        
+        def run():
+            import subprocess
+            cmd = [sys.executable, "scripts/pre_market.py"]
+            if self.no_ai.get():
+                cmd.append("--no-ai")
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(PROJECT_ROOT))
+                self.root.after(0, lambda: self._log(result.stdout if result.stdout else "Completed"))
+                if result.stderr:
+                    self.root.after(0, lambda: self._log(f"[STDERR] {result.stderr}"))
+            except Exception as e:
+                self.root.after(0, lambda: self._log(f"[ERROR] {e}"))
+            finally:
+                self.root.after(0, lambda: self.run_btn.config(state=tk.NORMAL))
+                self.root.after(0, self._refresh_premarket)
+        
+        threading.Thread(target=run, daemon=True).start()
+
+    def _build_trades_tab(self, parent):
+        """Build the Trades tab for trade simulation and tracking."""
+        # Header
+        header = ttk.Frame(parent, style='Panel.TFrame')
+        header.pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        ttk.Label(header, text="TRADE SIMULATION", style='Gold.TLabel').pack(side=tk.LEFT)
+        
+        ttk.Button(
+            header,
+            text="Refresh",
+            style='Secondary.TButton',
+            command=self._refresh_trades
+        ).pack(side=tk.RIGHT)
+        
+        # Main content - split into active trades and closed trades
+        content = ttk.Frame(parent, style='Panel.TFrame')
+        content.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Left side: Trade summary and active trades
+        left_frame = ttk.Frame(content, style='Light.TFrame')
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        
+        # Summary stats at top
+        summary_frame = ttk.Frame(left_frame, style='Light.TFrame')
+        summary_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(summary_frame, text="Performance Summary", 
+                 font=('Segoe UI', 11, 'bold'),
+                 background=self.colors['bg_light'],
+                 foreground=self.colors['gold']).pack(anchor=tk.W)
+        
+        self.trade_summary_text = tk.Text(
+            summary_frame,
+            bg=self.colors['bg_light'],
+            fg=self.colors['text'],
+            font=('Consolas', 10),
+            height=6,
+            relief=tk.FLAT,
+            padx=10,
+            pady=5
+        )
+        self.trade_summary_text.pack(fill=tk.X, pady=(5, 0))
+        
+        # Active trades section
+        ttk.Label(left_frame, text="Active Positions", 
+                 font=('Segoe UI', 11, 'bold'),
+                 background=self.colors['bg_light'],
+                 foreground=self.colors['gold']).pack(anchor=tk.W, padx=10, pady=(10, 5))
+        
+        # Active trades treeview
+        columns = ('id', 'direction', 'entry', 'current', 'sl', 'pnl', 'pnl_pct')
+        self.active_trades_tree = ttk.Treeview(left_frame, columns=columns, show='headings', height=6)
+        
+        self.active_trades_tree.heading('id', text='#')
+        self.active_trades_tree.heading('direction', text='Dir')
+        self.active_trades_tree.heading('entry', text='Entry')
+        self.active_trades_tree.heading('current', text='Current')
+        self.active_trades_tree.heading('sl', text='SL')
+        self.active_trades_tree.heading('pnl', text='PnL ($)')
+        self.active_trades_tree.heading('pnl_pct', text='PnL (%)')
+        
+        self.active_trades_tree.column('id', width=30)
+        self.active_trades_tree.column('direction', width=50)
+        self.active_trades_tree.column('entry', width=80)
+        self.active_trades_tree.column('current', width=80)
+        self.active_trades_tree.column('sl', width=80)
+        self.active_trades_tree.column('pnl', width=80)
+        self.active_trades_tree.column('pnl_pct', width=70)
+        
+        self.active_trades_tree.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        # Right side: Closed trades history
+        right_frame = ttk.Frame(content, style='Light.TFrame')
+        right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
+        
+        ttk.Label(right_frame, text="Trade History", 
+                 font=('Segoe UI', 11, 'bold'),
+                 background=self.colors['bg_light'],
+                 foreground=self.colors['gold']).pack(anchor=tk.W, padx=10, pady=(10, 5))
+        
+        self.closed_trades_text = scrolledtext.ScrolledText(
+            right_frame,
+            bg=self.colors['bg_light'],
+            fg=self.colors['text'],
+            font=('Consolas', 9),
+            relief=tk.FLAT,
+            padx=10,
+            pady=10
+        )
+        self.closed_trades_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        
+        # Load initial trades data
+        self._refresh_trades()
+
+    def _refresh_trades(self):
+        """Refresh the trades tab with current trade data from Cortex memory."""
+        try:
+            if MEMORY_FILE.exists():
+                with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
+                    memory = json.load(f)
+            else:
+                memory = {}
+        except Exception as e:
+            memory = {'error': str(e)}
+        
+        # Update summary
+        self.trade_summary_text.config(state=tk.NORMAL)
+        self.trade_summary_text.delete(1.0, tk.END)
+        
+        total_wins = memory.get('total_wins', 0)
+        total_losses = memory.get('total_losses', 0)
+        total_trades = total_wins + total_losses
+        win_rate = (total_wins / total_trades * 100) if total_trades > 0 else 0
+        total_pnl = memory.get('total_pnl', 0)
+        win_streak = memory.get('win_streak', 0)
+        loss_streak = memory.get('loss_streak', 0)
+        active_count = len(memory.get('active_trades', []))
+        
+        summary = f"""Total Trades: {total_trades}  |  Active: {active_count}
+Win/Loss: {total_wins}W / {total_losses}L  |  Win Rate: {win_rate:.1f}%
+Total PnL: ${total_pnl:.2f}
+Current Streak: {win_streak}W / {loss_streak}L"""
+        
+        self.trade_summary_text.insert(tk.END, summary)
+        self.trade_summary_text.config(state=tk.DISABLED)
+        
+        # Update active trades tree
+        for item in self.active_trades_tree.get_children():
+            self.active_trades_tree.delete(item)
+        
+        active_trades = memory.get('active_trades', [])
+        for trade in active_trades:
+            pnl = trade.get('unrealized_pnl', 0)
+            pnl_pct = trade.get('unrealized_pnl_pct', 0)
+            pnl_color = 'green' if pnl >= 0 else 'red'
+            
+            self.active_trades_tree.insert('', tk.END, values=(
+                trade.get('id', '?'),
+                trade.get('direction', '?'),
+                f"${trade.get('entry_price', 0):.2f}",
+                f"${trade.get('current_price', 0):.2f}",
+                f"${trade.get('stop_loss', 0):.2f}",
+                f"${pnl:.2f}",
+                f"{pnl_pct:+.2f}%"
+            ))
+        
+        # Update closed trades
+        self.closed_trades_text.config(state=tk.NORMAL)
+        self.closed_trades_text.delete(1.0, tk.END)
+        
+        closed_trades = memory.get('closed_trades', [])
+        if not closed_trades:
+            self.closed_trades_text.insert(tk.END, "No closed trades yet.\n\n")
+            self.closed_trades_text.insert(tk.END, "Trade history will appear here as trades are closed.")
+        else:
+            for trade in reversed(closed_trades[-20:]):  # Last 20 trades
+                result = trade.get('result', 'UNKNOWN')
+                result_marker = "[WIN]" if result == 'WIN' else "[LOSS]" if result == 'LOSS' else "[BE]"
+                pnl = trade.get('realized_pnl', 0)
+                pnl_pct = trade.get('realized_pnl_pct', 0)
+                
+                self.closed_trades_text.insert(tk.END, f"{result_marker} Trade #{trade.get('id', '?')}\n")
+                self.closed_trades_text.insert(tk.END, f"  {trade.get('direction', '?')} @ ${trade.get('entry_price', 0):.2f}")
+                self.closed_trades_text.insert(tk.END, f" -> ${trade.get('exit_price', 0):.2f}\n")
+                self.closed_trades_text.insert(tk.END, f"  PnL: ${pnl:.2f} ({pnl_pct:+.2f}%)\n")
+                self.closed_trades_text.insert(tk.END, f"  Reason: {trade.get('exit_reason', 'N/A')}\n")
+                self.closed_trades_text.insert(tk.END, "-" * 40 + "\n")
+        
+        self.closed_trades_text.config(state=tk.DISABLED)
+
     def _log(self, message: str):
         """Add a message to the log panel."""
         self.log_text.config(state=tk.NORMAL)
@@ -652,6 +930,8 @@ class GoldStandardGUI:
         self._refresh_reports()
         self._refresh_charts()
         self._refresh_journal()
+        self._refresh_premarket()
+        self._refresh_trades()
 
     def _refresh_reports(self):
         """Refresh the reports list."""
