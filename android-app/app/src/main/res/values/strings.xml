@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gold Standard</string>
+    <string name="dashboard_title">Dashboard</string>
+    <string name="chart_title">Chart</string>
+    <string name="reports_title">Reports</string>
+    <string name="gold_price">Gold Price</string>
+    <string name="refresh">Refresh</string>
+    <string name="loading">Loading...</string>
+    <string name="error_loading">Error loading data</string>
+    <string name="no_reports">No reports available</string>
+    <string name="sma_overlay">SMA</string>
+    <string name="rsi_overlay">RSI</string>
+    <string name="price_change">Change</string>
+    <string name="content_description_chart">Chart Icon</string>
+    <string name="content_description_reports">Reports Icon</string>
+    <string name="content_description_back">Back</string>
+</resources>

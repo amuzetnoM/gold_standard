@@ -68,3 +68,19 @@ secrets.json
 # Local data & lock files
 cortex_memory.json
 cortex_memory.lock
+
+# Android specific
+*.iml
+.gradle/
+local.properties
+.cxx/
+*.apk
+*.ap_
+*.aab
+*.hprof
+android-app/.gradle/
+android-app/app/build/
+android-app/build/
+android-app/captures/
+android-app/.externalNativeBuild/
+android-app/.cxx/
