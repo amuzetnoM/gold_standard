@@ -508,18 +508,123 @@ class QuantEngine:
                     self.logger.debug(f"No data returned for {ticker}")
                     continue
                 
-                # Calculate technical indicators
-                df['RSI'] = ta.rsi(df['Close'], length=14)
-                df['SMA_200'] = ta.sma(df['Close'], length=200)
-                df['SMA_50'] = ta.sma(df['Close'], length=50)
-                df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-                
-                # ADX (Trend Strength)
-                adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=14)
+                # Validate minimal columns exist
+                required_columns = ['Open', 'High', 'Low', 'Close']
+                if not all(col in df.columns for col in required_columns):
+                    self.logger.warning(f"Missing required OHLC columns for {ticker}: {df.columns}")
+                    continue
+
+                # Ensure index is timezone-aware or normalized
+                df.index = pd.to_datetime(df.index)
+
+                # Calculate technical indicators safely with fallbacks
+                def safe_indicator_series(name, func, *fargs, **fkwargs):
+                    try:
+                        out = func(*fargs, **fkwargs)
+                        # If a DataFrame or Series make sure it aligns with index
+                        if out is None:
+                            return None
+                        if isinstance(out, pd.Series):
+                            s = out
+                        else:
+                            s = pd.Series(out, index=df.index)
+                        if len(s) != len(df):
+                            self.logger.warning(f"Indicator {name} returned {len(s)} values for {ticker} but df has {len(df)} index; ignoring {name}")
+                            return None
+                        return s
+                    except Exception as e:
+                        self.logger.warning(f"Safe indicator {name} failed for {ticker}: {e}")
+                        return None
+
+                # Compute indicators with backoff to fallback implementations
+                try:
+                    # RSI
+                    rsi_series = safe_indicator_series('RSI', ta.rsi, df['Close'], length=14)
+                    if rsi_series is None:
+                        # fallback computation
+                        delta = df['Close'].diff()
+                        up = delta.clip(lower=0)
+                        down = -delta.clip(upper=0)
+                        ma_up = up.rolling(window=14, min_periods=14).mean()
+                        ma_down = down.rolling(window=14, min_periods=14).mean()
+                        rs = ma_up / ma_down
+                        rsi_series = 100 - (100 / (1 + rs))
+                except Exception as e:
+                    self.logger.warning(f"RSI computation failed for {ticker}: {e}")
+                    rsi_series = None
+
+                try:
+                    sma200 = safe_indicator_series('SMA_200', ta.sma, df['Close'], length=200)
+                except Exception:
+                    sma200 = None
+                try:
+                    sma50 = safe_indicator_series('SMA_50', ta.sma, df['Close'], length=50)
+                except Exception:
+                    sma50 = None
+
+                try:
+                    atr_series = safe_indicator_series('ATR', ta.atr, df['High'], df['Low'], df['Close'], length=14)
+                    if atr_series is None:
+                        # fallback ATR as rolling mean of TR
+                        prev_close = df['Close'].shift(1)
+                        tr1 = df['High'] - df['Low']
+                        tr2 = (df['High'] - prev_close).abs()
+                        tr3 = (df['Low'] - prev_close).abs()
+                        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                        atr_series = tr.rolling(window=14, min_periods=14).mean()
+                except Exception as e:
+                    self.logger.warning(f"ATR computation failed for {ticker}: {e}")
+                    atr_series = None
+
+                # ADX returns DataFrame with multiple columns. Wrap safely.
+                try:
+                    adx_df = None
+                    raw_adx = None
+                    try:
+                        raw_adx = ta.adx(df['High'], df['Low'], df['Close'], length=14)
+                    except Exception:
+                        raw_adx = None
+                    if raw_adx is not None:
+                        if isinstance(raw_adx, pd.DataFrame):
+                            adx_df = raw_adx
+                        else:
+                            # if series, no
+                            adx_df = None
+                    if adx_df is None:
+                        # fallback ADX
+                        prev_close = df['Close'].shift(1)
+                        tr1 = df['High'] - df['Low']
+                        tr2 = (df['High'] - prev_close).abs()
+                        tr3 = (df['Low'] - prev_close).abs()
+                        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                        atr = tr.rolling(window=14, min_periods=14).mean()
+                        up_move = df['High'].diff()
+                        down_move = -df['Low'].diff()
+                        plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+                        minus_dm = (-down_move).where((down_move > up_move) & (down_move > 0), 0.0)
+                        plus_di = (plus_dm.rolling(window=14, min_periods=14).sum() / atr) * 100
+                        minus_di = (minus_dm.rolling(window=14, min_periods=14).sum() / atr) * 100
+                        dx = (plus_di - minus_di).abs() / (plus_di + minus_di) * 100
+                        adx_ser = dx.rolling(window=14, min_periods=14).mean()
+                        adx_df = pd.DataFrame({f'ADX_14': adx_ser, f'DMP_14': plus_di, f'DMN_14': minus_di})
+                except Exception as e:
+                    self.logger.warning(f"ADX computation failed for {ticker}: {e}")
+                    adx_df = None
+
+                # Assign computed indicators if present
+                if rsi_series is not None:
+                    df['RSI'] = rsi_series
+                if sma200 is not None:
+                    df['SMA_200'] = sma200
+                if sma50 is not None:
+                    df['SMA_50'] = sma50
+                if atr_series is not None:
+                    df['ATR'] = atr_series
                 if adx_df is not None:
                     df = pd.concat([df, adx_df], axis=1)
-                
-                df_clean = df.dropna()
+
+                # Only drop rows based on missing OHLC data — keep indicator NaNs to avoid dropping datasets
+                df_clean = df.dropna(subset=['Open', 'High', 'Low', 'Close'])
                 if not df_clean.empty:
                     return df_clean
                     
@@ -545,22 +650,57 @@ class QuantEngine:
         """Generate candlestick chart with technical overlays."""
         try:
             # Prepare additional plots
-            sma50 = ta.sma(df['Close'], 50)
-            sma200 = ta.sma(df['Close'], 200)
+            # Prefer columns if precomputed by _fetch; else compute safely
+            def safe_sma(series, length):
+                try:
+                    out = None
+                    # Try using ta if available
+                    out = ta.sma(series, length)
+                    if out is None:
+                        raise Exception('ta.sma returned None')
+                    if isinstance(out, pd.Series):
+                        s = out
+                    else:
+                        s = pd.Series(out, index=series.index)
+                    if len(s) != len(series):
+                        raise Exception('sma length mismatch')
+                    return s
+                except Exception:
+                    # fallback to pandas rolling mean
+                    try:
+                        return series.rolling(window=length, min_periods=length).mean()
+                    except Exception:
+                        return None
+
+            if 'SMA_50' in df.columns:
+                sma50 = df['SMA_50']
+            else:
+                sma50 = safe_sma(df['Close'], 50)
+            if 'SMA_200' in df.columns:
+                sma200 = df['SMA_200']
+            else:
+                sma200 = safe_sma(df['Close'], 200)
             
+            # Slice the dataframe to the candle count to plot; additionally slice addplot series to match length
+            plot_df = df.tail(self.config.CHART_CANDLE_COUNT)
             apds = []
-            if sma50 is not None and not sma50.isna().all():
-                apds.append(mpf.make_addplot(sma50, color='orange', width=1))
-            if sma200 is not None and not sma200.isna().all():
-                apds.append(mpf.make_addplot(sma200, color='blue', width=1))
+            sma50_plot = None
+            sma200_plot = None
+            if sma50 is not None:
+                sma50_plot = sma50.reindex(plot_df.index)
+            if sma200 is not None:
+                sma200_plot = sma200.reindex(plot_df.index)
+            if sma50_plot is not None and hasattr(sma50_plot, 'isna') and not sma50_plot.isna().all():
+                apds.append(mpf.make_addplot(sma50_plot, color='orange', width=1))
+            if sma200_plot is not None and hasattr(sma200_plot, 'isna') and not sma200_plot.isna().all():
+                apds.append(mpf.make_addplot(sma200_plot, color='blue', width=1))
             
             style = mpf.make_mpf_style(
                 base_mpf_style='nightclouds',
                 rc={'font.size': 8}
             )
-            
             chart_path = os.path.join(self.config.CHARTS_DIR, f"{name}.png")
-            
+
             plot_kwargs = {
                 'type': 'candle',
                 'volume': False,
@@ -571,8 +711,7 @@ class QuantEngine:
             
             if apds:
                 plot_kwargs['addplot'] = apds
-            
-            mpf.plot(df.tail(self.config.CHART_CANDLE_COUNT), **plot_kwargs)
+            mpf.plot(plot_df, **plot_kwargs)
             # ensure chart was actually written
             ok = False
             try:

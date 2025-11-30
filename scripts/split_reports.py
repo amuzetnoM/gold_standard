@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""
+Split Reports Generator
+Generates weekly rundowns and monthly/yearly reports using the existing QuantEngine and Strategist.
+"""
+import os
+import sys
+import argparse
+import datetime
+from typing import Dict, Any
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from main import Config, setup_logging, Cortex, QuantEngine, Strategist
+import pandas as pd
+
+
+def ensure_dirs(config: Config):
+    out = config.OUTPUT_DIR
+    reports = os.path.join(out, "reports")
+    charts = os.path.join(reports, "charts")
+    os.makedirs(reports, exist_ok=True)
+    os.makedirs(charts, exist_ok=True)
+    return reports, charts
+
+
+def write_report(report_path: str, markdown: str):
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(markdown)
+
+
+def monthly_yearly_report(config: Config, logger, model=None, dry_run=False, no_ai=False) -> str:
+    """Generate a combined monthly and yearly report."""
+    logger.info("Generating monthly and yearly report")
+    reports_dir, charts_dir = ensure_dirs(config)
+
+    # Use QuantEngine to fetch full year+ data for each asset
+    q = QuantEngine(config, logger)
+
+    # We'll fetch 2 years to cover last year + this year
+    period = "2y"
+    interval = "1d"
+
+    # No intermediate results structure needed; we'll collect monthly and yearly tables
+
+    # We'll iterate ASSETS directly to fetch dataframes
+    from main import ASSETS
+
+    asset_monthly: Dict[str, pd.DataFrame] = {}
+    asset_yearly: Dict[str, pd.DataFrame] = {}
+    for key, conf in ASSETS.items():
+        try:
+            df = q._fetch(conf['p'], conf['b'])
+            if df is None or df.empty:
+                logger.warning(f"No data for {key}")
+                continue
+
+            # Ensure index is a datetime index and sorted
+            df = df.sort_index()
+            df.index = pd.to_datetime(df.index)
+
+            # Monthly aggregation
+            monthly = df.resample('M').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last'})
+            monthly['Return'] = monthly['Close'].pct_change() * 100
+
+            # Yearly aggregation
+            yearly = df.resample('Y').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last'})
+            yearly['Return'] = yearly['Close'].pct_change() * 100
+
+            asset_monthly[key] = monthly
+            asset_yearly[key] = yearly
+
+            # Generate a chart for the monthly range (last 12 months)
+            q._chart(key, df.tail(365))
+            # copy chart to reports/charts
+            src = os.path.join(config.CHARTS_DIR, f"{key}.png")
+            dst = os.path.join(charts_dir, f"{key}_1y.png")
+            try:
+                if os.path.exists(src):
+                    import shutil
+                    shutil.copy2(src, dst)
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.error(f"Error processing {key}: {e}")
+
+    # Build markdown
+    now = datetime.date.today()
+    filename = f"monthly_yearly_report_{now}.md"
+    path = os.path.join(reports_dir, filename)
+
+    md = []
+    md.append(f"# Monthly & Yearly Report — {now}\n")
+    md.append("## Summary\n")
+    # Aggregated summary: latest snapshot from QuantEngine.get_data
+    snapshot = q.get_data()
+    if snapshot is None:
+        md.append("Data fetch failed — no snapshot available.\n")
+    else:
+        for k, v in snapshot.items():
+            if not isinstance(v, dict):
+                continue
+            md.append(f"- **{k}**: Price: ${v.get('price')} | Change: {v.get('change')}% | RSI: {v.get('rsi')} | ADX: {v.get('adx')}\n")
+
+    # Monthly tables
+    md.append("\n## Monthly Breakdowns\n")
+    for key, table in asset_monthly.items():
+        md.append(f"### {key}\n\n")
+        md.append("| Month | Open | High | Low | Close | Return (%) |\n")
+        md.append("|---|---:|---:|---:|---:|---:|\n")
+        for idx, row in table.iterrows():
+            md.append(f"| {idx.strftime('%Y-%m')} | {row['Open']:.2f} | {row['High']:.2f} | {row['Low']:.2f} | {row['Close']:.2f} | {row['Return']:.2f} |\n")
+        md.append("\n")
+
+    # Yearly tables
+    md.append("\n## Yearly Breakdowns\n")
+    for key, table in asset_yearly.items():
+        md.append(f"### {key}\n\n")
+        md.append("| Year | Open | High | Low | Close | Return (%) |\n")
+        md.append("|---|---:|---:|---:|---:|---:|\n")
+        for idx, row in table.iterrows():
+            md.append(f"| {idx.year} | {row['Open']:.2f} | {row['High']:.2f} | {row['Low']:.2f} | {row['Close']:.2f} | {row['Return']:.2f} |\n")
+        md.append("\n")
+
+    # AI forecast: next year
+    if not no_ai and model is not None:
+        strategist = Strategist(config, logger, snapshot or {}, q.news, Cortex(config, logger).get_formatted_history(), model=model)
+        prompt = strategist._build_prompt(gsr=snapshot.get('RATIOS', {}).get('GSR', 'N/A'), vix_price=snapshot.get('VIX', {}).get('price', 'N/A'), data_dump=strategist._format_data_summary())
+        try:
+            response = model.generate_content(prompt)
+            response_text = response.text
+            md.append("\n## AI Forecast for Next Year\n")
+            md.append(response_text + "\n")
+        except Exception as e:
+            logger.error(f"AI generation failed: {e}")
+
+    write_report(path, "\n".join(md))
+    logger.info(f"Monthly & Yearly report written to {path}")
+    return path
+
+
+def weekly_rundown(config: Config, logger, model=None, dry_run=False, no_ai=False) -> str:
+    logger.info("Generating weekly rundown report")
+    reports_dir, charts_dir = ensure_dirs(config)
+    q = QuantEngine(config, logger)
+    snapshot = q.get_data()
+    if not snapshot:
+        logger.warning("Data fetch failed - building a report with available data (may be missing entries)")
+        snapshot = {}
+
+    # produce weekly tactical guidance using Strategist with a short-horizon prompt
+    md = []
+    now = datetime.date.today()
+    filename = f"weekly_rundown_{now}.md"
+    report_path = os.path.join(reports_dir, filename)
+
+    md.append(f"# Weekly Rundown — {now}\n")
+    md.append("## Overview\n")
+    for k, v in snapshot.items():
+        if not isinstance(v, dict):
+            continue
+        md.append(f"- **{k}**: Price: ${v.get('price')} | Change: {v.get('change')}% | RSI: {v.get('rsi')} | ADX: {v.get('adx')}\n")
+
+    if not no_ai and model is not None:
+        strategist = Strategist(config, logger, snapshot, q.news, Cortex(config, logger).get_formatted_history(), model=model)
+        # Build a short weekly-focused prompt
+        prompt = strategist._build_prompt(gsr=snapshot.get('RATIOS', {}).get('GSR', 'N/A'), vix_price=snapshot.get('VIX', {}).get('price', 'N/A'), data_dump=strategist._format_data_summary())
+        try:
+            response = model.generate_content(prompt)
+            md.append("## AI Tactical Thesis\n")
+            md.append(response.text + "\n")
+        except Exception as e:
+            logger.error(f"AI generation failed: {e}")
+    else:
+        md.append("## Tactical Thesis (No AI Mode)\n")
+        md.append("AI disabled; provide your own tactical notes or re-run with AI enabled for an automated thesis.\n")
+
+    # Create short timeframe charts (1 week) for assets
+    for key, conf in __import__('main').ASSETS.items():
+        try:
+            df = q._fetch(conf['p'], conf['b'])
+            if df is None or df.empty:
+                continue
+            # Use last 14 days window for weekly chart context
+            df_week = df.tail(14)
+            q._chart(key + "_WEEK", df_week)
+            src = os.path.join(config.CHARTS_DIR, f"{key}_WEEK.png")
+            if not os.path.exists(src):
+                # fallback to generic
+                src = os.path.join(config.CHARTS_DIR, f"{key}.png")
+            dst = os.path.join(charts_dir, f"{key}_week.png")
+            if os.path.exists(src):
+                import shutil
+                shutil.copy2(src, dst)
+                md.append(f"![{key} Weekly](charts/{key}_week.png)\n")
+        except Exception:
+            continue
+
+    write_report(report_path, "\n".join(md))
+    logger.info(f"Weekly rundown written to {report_path}")
+    return report_path
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Split Reports: generate weekly, monthly, and yearly reports")
+    parser.add_argument('--mode', choices=['weekly', 'monthly', 'yearly', 'all'], default='weekly')
+    parser.add_argument('--once', action='store_true', help='Run once and exit')
+    parser.add_argument('--dry-run', action='store_true', help='Do not write files')
+    parser.add_argument('--no-ai', action='store_true', help='Do not use AI')
+    parser.add_argument('--gemini-key', default=None, help='Override API key')
+    parser.add_argument('--log-level', default='INFO')
+    args = parser.parse_args()
+
+    config = Config()
+    if args.gemini_key:
+        config.GEMINI_API_KEY = args.gemini_key
+
+    logger = setup_logging(config)
+    logger.setLevel(getattr(logger, args.log_level.upper(), 'INFO'))
+
+    # Configure AI
+    model_obj = None
+    if not args.no_ai:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=config.GEMINI_API_KEY)
+            model_obj = genai.GenerativeModel(config.GEMINI_MODEL)
+            logger.info(f"Configured Gemini model: {config.GEMINI_MODEL}")
+        except Exception as e:
+            logger.error(f"Failed to configure Gemini: {e}")
+            model_obj = None
+
+    if args.mode in ('monthly', 'all', 'yearly'):
+        monthly_yearly_report(config, logger, model=model_obj, dry_run=args.dry_run, no_ai=args.no_ai)
+    if args.mode in ('weekly', 'all'):
+        weekly_rundown(config, logger, model=model_obj, dry_run=args.dry_run, no_ai=args.no_ai)
+
+if __name__ == '__main__':
+    main()

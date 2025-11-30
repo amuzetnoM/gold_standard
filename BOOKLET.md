@@ -1,4 +1,26 @@
-# Gold Standard — Technical Booklet & Educational Guide
+Split Reports: Weekly & Monthly/Yearly
+------------------------------------
+This repository includes `scripts/split_reports.py` to generate two kinds of specialized outputs:
+
+- Weekly Rundown: Short tactical notes and suggested stops/entries for the next week. The script aggregates short-term data and includes a short timeframe chart per asset.
+- Monthly & Yearly Report: A longer-form analysis including monthly tables, yearly tables, returns, and an optional AI-driven forecast for the coming year.
+
+Implementation notes:
+- The split report script reuses `QuantEngine._fetch` and `QuantEngine._chart` to collect and visualize data. It computes monthly and yearly aggregations with pandas Resampling (`.resample('M')` and `.resample('Y')`).
+- The script writes reports to `output/reports/` and charts to `output/reports/charts/`.
+- The script accepts `--no-ai` to remove AI calls for cheaper/faster runs.
+
+Robustness & Data Handling Notes
+- The quant engine validates raw OHLC columns exist and performs indicator calculations with a safe wrapper. The wrapper attempts the primary library (`pandas_ta`) and falls back to pandas computations if the primary call raises errors or returns mismatched lengths.
+- The fallback logic reduces runtime failures due to external library mismatches or odd runtime environments (e.g., missing `numba` or incompatibility with Python 3.14).
+- The engine only drops rows based on missing OHLC values, keeping datasets even if indicator computations fail for some rows.
+
+Testing:
+- The script contains simple integration tests that run in `--no-ai` mode and assert that report files are produced. For more deterministic validation, add fixtures under `tests/data/` and mock `QuantEngine._fetch` to provide deterministic candles.
+
+# Gold Standard
+
+> Technical Booklet & Educational Guide
 
 This booklet is an educational companion to the Gold Standard project and is intended for developers and quants interested in understanding the mathematical foundations, the design choices, and suggested extension points.
 

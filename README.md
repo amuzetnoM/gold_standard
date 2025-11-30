@@ -114,6 +114,29 @@ How to extend:
 2. Extend `QuantEngine._fetch` to compute additional indicators.
 3. Add plotting in `QuantEngine._chart` and validate output.
 4. Add unit tests under `tests/` and fixtures under `tests/data/`.
+## Split Reports (weekly / monthly / yearly)
+
+This repository includes a dedicated report generator script that produces specialized reports for longer-term and tactical planning:
+
+- `scripts/split_reports.py` — run this to generate:
+  - Weekly rundown: a short tactical outlook for the upcoming week
+  - Monthly & Yearly: aggregated monthly/yearly summaries including returns, ranges, and AI forecasts for the next year
+
+Usage examples:
+
+```bash
+# Weekly tactical rundown without AI
+python scripts/split_reports.py --mode weekly --once --no-ai
+
+# Monthly+Yearly report with AI (requires GEMINI_API_KEY)
+python scripts/split_reports.py --mode monthly --once
+
+# Generate all available reports
+python scripts/split_reports.py --mode all --once --no-ai
+```
+
+Outputs are created under `output/reports/` with charts in `output/reports/charts/`.
+
 
 
 ---
@@ -184,6 +207,12 @@ Technical Indicators & Fallbacks
   - Compute ATR as the rolling mean of true ranges
   - Provide a basic ADX implementation with DMI components
 - Caveat: Fallback ADX is functional but may differ from `pandas_ta` / numba-based computations. For production-grade reliability, run this under Python 3.11 with `pandas_ta` and `numba` installed.
+
+Robustness improvements:
+- The data pipeline now validates that the OHLC columns exist and are long enough before calculating indicators.
+- Indicators (RSI, SMA, ATR, ADX) are computed with safe wrappers which fall back to internal pandas-based implementations if the primary library (`pandas_ta`) raises an error or returns an unexpected output length.
+- The fetch logic avoids dropping rows because of missing indicators — only OHLC NaNs are removed, so missing indicator values do not cause a dataset to be discarded.
+- This prevents the runtime error "Length of values (0) does not match length of index", where indicator libraries might return an empty array or throw during computation.
 
 Logging, File Locking & Concurrency
 - Logging is done via a root logger `GoldStandard` with:
