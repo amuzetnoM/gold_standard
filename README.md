@@ -1,3 +1,254 @@
+# Gold Standard Quant Analysis (Detailed Technical Overview)
+
+Welcome to Gold Standard — an end-to-end quantitative analysis pipeline focusing on gold (and its intermarket relationships) with AI-enhanced reporting.
+
+This README provides an exhaustive technical overview of the repository and how each module operates. A separate companion `BOOKLET.md` provides a conceptual primer and tutorial for newcomers wanting to understand the math, architecture, and operational best practices.
+
+Table of contents
+- Quickstart
+- Architecture & Module Deep Dive
+  - Cortex (Memory & Reflection)
+  - QuantEngine (Market Data, Indicators & Charts)
+  - Strategist (AI Analysis & Bias Extraction)
+  - Execution Loop & Scheduling
+- Data Pipeline Details
+- Technical Indicators & Fallbacks
+- Logging, File Locking & Concurrency
+- Secrets Management & Pre-commit Hooks
+- Development, Tests, and CI Recommendations
+- Troubleshooting & Operational Notes
+- Contributing & Future Work
+- Appendices
+
+---
+
+Quickstart ✅
+
+1) Create local virtual environment and install dependencies:
+
+   PowerShell (Windows):
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   python -m pip install -r requirements.txt
+   python -m pip install -r requirements-dev.txt  # for tests & pre-commit
+   ```
+
+   Unix (macOS / Linux):
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   pip install -r requirements-dev.txt
+   ```
+
+2) Prepare environment variables:
+   - Provide `GEMINI_API_KEY` in a local `.env` file (not committed) or export in your session.
+   - `python-dotenv` will automatically load `.env` when running `python main.py`.
+
+3) Local test run (no AI; quick):
+   ```bash
+   python main.py --once --no-ai
+   ```
+
+4) Run with AI (requires `GEMINI_API_KEY`):
+   ```bash
+   python main.py --once
+   ```
+
+Output will be under `output/` with charts `output/charts` and a markdown journal `Journal_YYYY-MM-DD.md`.
+
+---
+
+Architecture & Module Deep Dive 🔍
+
+This project is organized as a single-file application for convenience (`main.py`) but internally follows clear module responsibilities. Below are the major components and their responsibilities.
+
+1) Cortex (Memory & Reflection)
+   - Purpose: Persistent memory for the system. Records and persists the last bias, last price, history of the last N predictions, win/loss counters and streaks.
+   - Storage: JSON file `cortex_memory.json` backed by `filelock.FileLock` to avoid corruption.
+   - Primary functions:
+     - `_load_memory()` merges defaults with a previously saved memory file.
+     - `update_memory(bias, current_gold_price)` writes the latest bias and price to memory.
+     - `grade_performance(current_gold_price)` compares current price with the last recorded price and updates win/loss counters.
+     - `get_formatted_history()` formats memory for input into the AI prompt.
+   - Notes:
+     - The memory schema is intentionally simple and human-readable; you can add keys if you need more features.
+
+2) QuantEngine (Market Data, Indicators & Charts)
+   - Purpose: Fetch market data, compute indicators, build charts, and collect news headlines.
+   - Data sources: `yfinance` is used to download OHLC Candle data. Each asset has a primary and backup ticker configuration (e.g., `GC=F` and `GLD` for Gold) in `ASSETS` map.
+   - Indicators computed:
+     - RSI (Relative Strength Index, period 14)
+     - SMA (50 and 200)
+     - ATR (Average True Range, period 14)
+     - ADX (Average Directional Index; for trend detection)
+   - Implementation note: `pandas_ta` is used for indicator calculations when available; if unavailable, a fallback implementation is used (safe monotonic approximations for SMA, RSI, ATR, ADX). The fallback is acceptable for analysis but not guaranteed to be numerically identical to `pandas_ta`/numba optimized code.
+   - Charts: Generated using `mplfinance` and saved to `output/charts`. The project verifies charts are written and larger than a small size threshold to avoid empty/placeholder images.
+   - News: `yfinance.Ticker(ticker).news` is polled when present for headline context.
+
+3) Strategist (AI Analysis & Bias Extraction)
+   - Purpose: Build a cleaned prompt from the quant data, pass it to Google Gemini, and parse the AI text for bias (BULLISH/BEARISH/NEUTRAL).
+   - Input: The memory history, daily telemetry and ratios (e.g., Gold/Silver), and recently fetched news.
+   - AI Integration: Uses `google.generativeai` with `GenerativeModel` to query a Gemini model (default `models/gemini-pro-latest`). The prompt includes explicit output rules and a markdown structure so the system can display the AI response in a structured journal.
+   - Bias extraction: The code uses regex-based parsing of the AI response to detect explicit bias declarations. It also uses a fallback counting approach if the AI did not mark the bias explicitly.
+
+4) Execution Loop & Scheduling
+   - Entry: `main()` configures environmental variables (via `dotenv`), CLI args, logging, and the GenAI model.
+   - Operation: `execute()` orchestrates a single run: fetch data, grade past predictions, run AI analysis, update memory, and write the report.
+   - Scheduling: The default runs each hour via the `schedule` package; the number of hours can be overridden by `--interval`.
+   - Graceful shutdown: SIGINT / SIGTERM are caught and the run will stop gracefully.
+
+---
+
+Data Pipeline Details & Safety
+--------------------------------
+This system attempts to avoid data issues by applying the following measures:
+- Primary/Backup tickers for each asset so if a primary does not return usable OHLC, a backup is attempted.
+- Drop NaN rows after indicator computation to only operate on clean, complete candle sets.
+- File lock on memory file to prevent multiple running instances from interfering.
+
+If you intend to run this on a VPS or in Docker, ensure a single instance is scheduled or use an external scheduler and a single memory store (e.g., S3) to avoid conflicts.
+
+Technical Indicators & Fallbacks 🛠️
+- This project uses `pandas_ta` for convenience, but to support running on newer Python releases or in environments where `numba` isn't available, fallback implementations are provided. These fallbacks:
+  - Compute SMA via rolling mean
+  - Compute RSI via the gains/losses averaging method
+  - Compute ATR as the rolling mean of true ranges
+  - Provide a basic ADX implementation with DMI components
+- Caveat: Fallback ADX is functional but may differ from `pandas_ta` / numba-based computations. For production-grade reliability, run this under Python 3.11 with `pandas_ta` and `numba` installed.
+
+Logging, File Locking & Concurrency 🚦
+- Logging is done via a root logger `GoldStandard` with:
+  - A console handler (INFO) for real-time observability
+  - A rotating file handler (5 MB max) writing to `output/gold_standard.log` for long-term diagnostics
+- `filelock.FileLock` is used to protect `cortex_memory.json` (via `Cortex.lock`). This prevents concurrent main process runs from corrupting memory.
+
+Secrets Management & Pre-commit Hooks 🛡️
+- Secrets should NEVER be committed to source control. The project contains a `.gitignore` entry for `.env` and `cortex_memory.json`.
+- `pre-commit` is configured in `.pre-commit-config.yaml` and includes:
+  - `black` formatting
+  - `detect-secrets` checks
+  - A local `prevent_secrets.py` script that blocks committing `.env` or other likely secret patterns
+- If you accidentally commit a secret, rotate it immediately and remove it from your repo history (e.g., using `git filter-repo`).
+
+Development, Tests, and CI Recommendations 🧪
+- Use Python 3.11 for best compatibility with `pandas_ta` and `numba`.
+- The repository includes `tests/test_core.py` (unit tests for bias parsing and fewer core functions). Run them with `pytest`.
+- Add a GitHub Actions workflow that:
+  1. Uses the `python` virtual environment with 3.11.
+  2. Installs dependencies from `requirements-dev.txt` and runs `pre-commit` and `pytest`.
+  3. Checks linting and formatting rules with `black` and `flake8` if desired.
+
+Troubleshooting & Operational Notes ⚠️
+- If `numba` fails to install on Python versions > 3.11, fallback logic will still run — but check numerical parity if you rely on ADX values.
+- If Gemini fails with `model not found`, use `scripts/list_gemini_models.py` with your credentials to locate an accessible model.
+- If chart generation fails or chart files are tiny, it likely indicates that the OHLC dataset is too small after NaN removal or the plotting backend failed; check `gold_standard.log` for the mpf errors.
+
+Contributing & Future Work
+- Suggested future improvements:
+  - Move modules into separate Python files for better testability
+  - Add more unit and integration tests (especially for core date boundaries, ADX math, and the strategy prompt)
+  - Add a minimal Flask or FastAPI-based view for journal browsing and visual chart rendering
+  - Add run-time metrics and Prometheus exporter; containerize the app for easy deployments
+
+Appendices: JSON Schema & Sample
+--------------------------------
+Memory (`cortex_memory.json`) schema (example):
+```json
+{
+  "history": [
+    {
+      "timestamp": "2025-11-30T12:34:56",
+      "prev_bias": "BULLISH",
+      "prev_price": 1940.12,
+      "current_price": 1960.55,
+      "delta_pct": 1.05,
+      "result": "WIN"
+    }
+  ],
+  "win_streak": 2,
+  "loss_streak": 0,
+  "total_wins": 7,
+  "total_losses": 3,
+  "last_bias": "BULLISH",
+  "last_price_gold": 1930.00,
+  "last_update": "2025-11-30T12:34:56"
+}
+```
+
+Report (`Journal_YYYY-MM-DD.md`) sample (excerpt):
+```markdown
+# Gold Standard Quant Report
+
+## 1. Algo Self-Correction
+* **Previous Call:** BULLISH @ $1930 -> $1960 (+1.55%) = WIN
+* **Current Stance:** BULLISH
+
+## 2. Macro & Intermarket
+* **Regime:** Trending
+* **Gold/Silver Ratio:** 85.2 (Silver cheap)
+* **VIX:** 18.4
+
+## 3. Strategic Thesis
+* **Bias:** **BULLISH**
+* **Logic:** ADX > 25, RSI not overbought, yields falling, etc.
+
+...and charts embedded after the body.
+```
+
+---
+
+Additional Educational Booklet: `BOOKLET.md` (Reference section for market indicators and prompt design) — see the compiled booklet in the repo for deep-dive explanations.
+
+---
+
+LICENSE
+-------
+MIT
+
+---
+
+If you’d like, I’ll now create the `BOOKLET.md` with an in-depth explanation of each technical concept used here (RSI, ATR, ADX, SMA, Gold/Silver ratio, prompt engineering for structured AI output, memory grading logic, and example extension patterns). Let me know if you want a separate folder (`docs/`) or want the booklet to include images and diagrams.
+
+## Git, Pushing Changes & Safety Checklist
+
+Before committing and pushing, perform these checks locally to avoid leaking secrets or committing large artifacts:
+
+1) Ensure git is installed locally:
+
+  PowerShell:
+  ```powershell
+  git --version
+  ```
+
+  Bash/Unix:
+  ```bash
+  git --version
+  ```
+
+2) Ensure the following files are in `.gitignore`: virtualenv, `.env` and `cortex_memory.json`.
+
+3) Run pre-commit hooks:
+  ```powershell
+  pre-commit run --all-files
+  ```
+  If you don't have `pre-commit`, install and configure it with `pre-commit install`.
+
+4) Stage, commit and push (PowerShell):
+  ```powershell
+  .\scripts\git_push.ps1 -Message "chore: update README, BOOKLET, pre-commit & secrets prevention"
+  ```
+
+  Or (Bash/Unix):
+  ```bash
+  ./scripts/git_push.sh "chore: update README, BOOKLET, pre-commit & secrets prevention"
+  ```
+
+5) Verify the remote branch and remote exist (`git branch -vv`) and ensure you pushed to the intended remote.
+
+If a secret has been accidentally committed, rotate it immediately and clean history (use `git filter-repo` or remove from history and force push after collaboration discussion).
+
 # Gold Standard
 
 > Quantitative Trading Analysis System
@@ -61,7 +312,7 @@ Get your API key from Google AI Studio or your Google Cloud/GenAI console.
 The `Config` dataclass in main.py exposes these defaults:
 
 - GEMINI_API_KEY: from environment (required)
-- GEMINI_MODEL: `gemini-1.5-pro-latest`
+- GEMINI_MODEL: `models/gemini-pro-latest`
 - DATA_PERIOD: `1y`
 - DATA_INTERVAL: `1d`
 - CHART_CANDLE_COUNT: 100
@@ -76,6 +327,24 @@ The `Config` dataclass in main.py exposes these defaults:
 - RUN_INTERVAL_HOURS: 1
 
 Adjust these values directly in main.py or extend the Config class as needed.
+
+## Secrets & Git
+
+This repository includes a `.gitignore` to prevent common local files (virtualenvs, output artifacts, caches) and secret files (`.env`, `cortex_memory.json`) from being committed.
+
+To enforce secret checks and simple formatting hooks, install `pre-commit` and the development dependencies and then register the hooks:
+
+PowerShell (Windows)
+```powershell
+python -m pip install -r requirements-dev.txt
+pre-commit install
+pre-commit run --all-files
+```
+
+This project includes a local pre-commit hook (`scripts/prevent_secrets.py`) which blocks commits containing `.env` or obvious secret patterns (e.g., API keys or private key blocks). Use `pre-commit` to install and run the hooks automatically before each commit.
+
+If you have accidentally committed secrets in the past, rotate those credentials immediately and remove them from the commit history, e.g., with `git filter-repo` or `git filter-branch`.
+
 
 ## Usage
 
