@@ -39,10 +39,11 @@ BANNER = r"""
 MENU = """
 Select a mode:
 
-  [1] Daily Journal   -  Full daily analysis with AI-generated thesis
-  [2] Weekly Rundown  -  Short-horizon tactical overview for the weekend
-  [3] Monthly Report  -  Monthly aggregated performance tables + AI outlook
-  [4] Yearly Report   -  Year-over-year analysis + AI forecast
+  [1] Daily Journal    -  Full daily analysis with AI-generated thesis
+  [2] Weekly Rundown   -  Short-horizon tactical overview
+  [3] Monthly Report   -  Monthly aggregated performance + AI outlook
+  [4] Yearly Report    -  Year-over-year analysis + AI forecast
+  [5] Pre-Market Plan  -  Daily pre-market trading plan
 
   [0] Exit
 
@@ -92,6 +93,15 @@ def run_yearly(no_ai: bool = False):
     os.system(" ".join(cmd_parts))
 
 
+def run_premarket(no_ai: bool = False):
+    """Run the pre-market plan via pre_market.py."""
+    print("\n>> Generating Pre-Market Plan...\n")
+    cmd_parts = [sys.executable, "scripts/pre_market.py"]
+    if no_ai:
+        cmd_parts.append("--no-ai")
+    os.system(" ".join(cmd_parts))
+
+
 def interactive_mode(no_ai: bool = False):
     """Interactive menu loop."""
     while True:
@@ -100,7 +110,7 @@ def interactive_mode(no_ai: bool = False):
         print(MENU)
         if no_ai:
             print("  [AI Disabled - running in --no-ai mode]\n")
-        choice = input("  Enter choice [0-4]: ").strip()
+        choice = input("  Enter choice [0-5]: ").strip()
 
         if choice == "1":
             run_daily(no_ai=no_ai)
@@ -114,11 +124,14 @@ def interactive_mode(no_ai: bool = False):
         elif choice == "4":
             run_yearly(no_ai=no_ai)
             input("\n  Press Enter to continue...")
+        elif choice == "5":
+            run_premarket(no_ai=no_ai)
+            input("\n  Press Enter to continue...")
         elif choice == "0":
             print("\n  Goodbye!\n")
             break
         else:
-            print("\n  Invalid choice. Please enter a number between 0 and 4.")
+            print("\n  Invalid choice. Please enter a number between 0 and 5.")
             input("  Press Enter to continue...")
 
 
@@ -138,8 +151,8 @@ Examples:
     )
     parser.add_argument(
         '--mode', '-m',
-        choices=['daily', 'weekly', 'monthly', 'yearly'],
-        help='Run mode: daily, weekly, monthly, or yearly. If omitted, interactive menu is shown.'
+        choices=['daily', 'weekly', 'monthly', 'yearly', 'premarket'],
+        help='Run mode: daily, weekly, monthly, yearly, or premarket. If omitted, interactive menu is shown.'
     )
     parser.add_argument(
         '--no-ai',
@@ -168,6 +181,8 @@ Examples:
             run_monthly(no_ai=args.no_ai)
         elif args.mode == 'yearly':
             run_yearly(no_ai=args.no_ai)
+        elif args.mode == 'premarket':
+            run_premarket(no_ai=args.no_ai)
         return
 
     # Interactive mode

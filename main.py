@@ -218,11 +218,12 @@ def signal_handler(signum: int, frame: Any) -> None:
 
 
 # ==========================================
-# MODULE 1: MEMORY & REFLECTION
+# MODULE 1: MEMORY & REFLECTION (CORTEX)
 # ==========================================
 class Cortex:
     """
-    Handles persistent storage of past decisions, predictions, and performance grading.
+    Advanced persistent memory system for the Gold Standard algo.
+    Tracks predictions, grades performance, and manages hypothetical trade positions.
     Uses file locking to prevent corruption from concurrent access.
     """
     
@@ -235,6 +236,7 @@ class Cortex:
     def _load_memory(self) -> Dict[str, Any]:
         """Load memory from JSON file with file locking."""
         default_memory = {
+            # Prediction tracking
             "history": [],
             "win_streak": 0,
             "loss_streak": 0,
@@ -242,26 +244,38 @@ class Cortex:
             "total_losses": 0,
             "last_bias": None,
             "last_price_gold": 0.0,
-            "last_update": None
+            "last_update": None,
+            # Trade simulation
+            "active_trades": [],
+            "closed_trades": [],
+            "total_pnl": 0.0,
+            "trade_count": 0,
+            # Strategic context
+            "current_regime": "UNKNOWN",
+            "confidence_level": 0.5,
+            "invalidation_triggers": [],
+            "key_levels": {
+                "support": [],
+                "resistance": [],
+                "stop_loss": None,
+                "take_profit": []
+            }
         }
         
         try:
-            # Attempt to create a memory file from the shipped template if it doesn't exist
             template_path = os.path.join(self.config.BASE_DIR, 'cortex_memory.template.json')
             with self.lock:
-                    if not os.path.exists(self.config.MEMORY_FILE) and os.path.exists(template_path):
-                        # Copy template to actual memory file without clobbering an existing file
-                        with open(template_path, 'r', encoding='utf-8') as t:
-                            template_content = t.read()
-                        with open(self.config.MEMORY_FILE, 'w', encoding='utf-8') as f:
-                            f.write(template_content)
-                        self.logger.debug(f"Initialized memory file from template: {self.config.MEMORY_FILE}")
+                if not os.path.exists(self.config.MEMORY_FILE) and os.path.exists(template_path):
+                    with open(template_path, 'r', encoding='utf-8') as t:
+                        template_content = t.read()
+                    with open(self.config.MEMORY_FILE, 'w', encoding='utf-8') as f:
+                        f.write(template_content)
+                    self.logger.debug(f"Initialized memory file from template: {self.config.MEMORY_FILE}")
 
-                    if os.path.exists(self.config.MEMORY_FILE):
-                        with open(self.config.MEMORY_FILE, 'r', encoding='utf-8') as f:
-                            loaded = json.load(f)
-                            # Merge with defaults to handle missing keys
-                            return {**default_memory, **loaded}
+                if os.path.exists(self.config.MEMORY_FILE):
+                    with open(self.config.MEMORY_FILE, 'r', encoding='utf-8') as f:
+                        loaded = json.load(f)
+                        return {**default_memory, **loaded}
         except filelock.Timeout:
             self.logger.error("Could not acquire memory file lock (timeout)")
         except json.JSONDecodeError as e:
@@ -271,21 +285,212 @@ class Cortex:
         
         return default_memory
 
-    def update_memory(self, bias: str, current_gold_price: float) -> None:
+    def _save_memory(self) -> bool:
+        """Persist memory to JSON file."""
+        try:
+            with self.lock:
+                with open(self.config.MEMORY_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(self.memory, f, indent=4)
+            return True
+        except filelock.Timeout:
+            self.logger.error("Could not acquire memory file lock for writing")
+        except Exception as e:
+            self.logger.error(f"Error saving memory: {e}")
+        return False
+
+    def update_memory(self, bias: str, current_gold_price: float, 
+                     regime: str = None, confidence: float = None,
+                     key_levels: Dict = None) -> None:
         """Save current state for the next run to judge."""
         self.memory["last_bias"] = bias
         self.memory["last_price_gold"] = current_gold_price
         self.memory["last_update"] = datetime.datetime.now().isoformat()
         
-        try:
-            with self.lock:
-                with open(self.config.MEMORY_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(self.memory, f, indent=4)
-            self.logger.debug(f"Memory updated: bias={bias}, price={current_gold_price}")
-        except filelock.Timeout:
-            self.logger.error("Could not acquire memory file lock for writing")
-        except Exception as e:
-            self.logger.error(f"Error saving memory: {e}")
+        if regime:
+            self.memory["current_regime"] = regime
+        if confidence is not None:
+            self.memory["confidence_level"] = confidence
+        if key_levels:
+            self.memory["key_levels"].update(key_levels)
+        
+        self._save_memory()
+        self.logger.debug(f"Memory updated: bias={bias}, price={current_gold_price}")
+
+    # ------------------------------------------
+    # Trade Simulation System
+    # ------------------------------------------
+    def open_trade(self, direction: str, entry_price: float, 
+                   stop_loss: float, take_profit: List[float],
+                   size: float = 1.0, rationale: str = "") -> Dict:
+        """
+        Open a hypothetical trade position.
+        Direction: LONG or SHORT
+        """
+        trade = {
+            "id": self.memory.get("trade_count", 0) + 1,
+            "direction": direction.upper(),
+            "entry_price": entry_price,
+            "entry_time": datetime.datetime.now().isoformat(),
+            "stop_loss": stop_loss,
+            "take_profit": take_profit if isinstance(take_profit, list) else [take_profit],
+            "size": size,
+            "rationale": rationale,
+            "status": "OPEN",
+            "current_price": entry_price,
+            "unrealized_pnl": 0.0,
+            "unrealized_pnl_pct": 0.0,
+            "partial_exits": [],
+            "trailing_stop": None
+        }
+        
+        self.memory["active_trades"].append(trade)
+        self.memory["trade_count"] = trade["id"]
+        self._save_memory()
+        
+        self.logger.info(f"[TRADE] Opened {direction} @ ${entry_price:.2f} | SL: ${stop_loss:.2f} | TP: {take_profit}")
+        return trade
+
+    def update_trade_prices(self, current_prices: Dict[str, float]) -> List[Dict]:
+        """
+        Update all active trades with current prices.
+        Returns list of any trades that hit SL or TP.
+        """
+        gold_price = current_prices.get('GOLD', 0)
+        if not gold_price:
+            return []
+        
+        triggered_trades = []
+        
+        for trade in self.memory.get("active_trades", []):
+            if trade["status"] != "OPEN":
+                continue
+            
+            trade["current_price"] = gold_price
+            entry = trade["entry_price"]
+            direction = trade["direction"]
+            
+            # Calculate unrealized PnL
+            if direction == "LONG":
+                pnl = (gold_price - entry) * trade["size"]
+                pnl_pct = ((gold_price - entry) / entry) * 100
+            else:  # SHORT
+                pnl = (entry - gold_price) * trade["size"]
+                pnl_pct = ((entry - gold_price) / entry) * 100
+            
+            trade["unrealized_pnl"] = round(pnl, 2)
+            trade["unrealized_pnl_pct"] = round(pnl_pct, 2)
+            
+            # Check stop loss
+            if direction == "LONG" and gold_price <= trade["stop_loss"]:
+                trade["exit_reason"] = "STOP_LOSS"
+                triggered_trades.append(trade)
+            elif direction == "SHORT" and gold_price >= trade["stop_loss"]:
+                trade["exit_reason"] = "STOP_LOSS"
+                triggered_trades.append(trade)
+            
+            # Check take profits (first target)
+            if trade["take_profit"]:
+                first_tp = trade["take_profit"][0]
+                if direction == "LONG" and gold_price >= first_tp:
+                    trade["exit_reason"] = "TAKE_PROFIT"
+                    triggered_trades.append(trade)
+                elif direction == "SHORT" and gold_price <= first_tp:
+                    trade["exit_reason"] = "TAKE_PROFIT"
+                    triggered_trades.append(trade)
+        
+        self._save_memory()
+        return triggered_trades
+
+    def close_trade(self, trade_id: int, exit_price: float, 
+                    reason: str = "MANUAL") -> Optional[Dict]:
+        """Close an active trade and record results."""
+        for i, trade in enumerate(self.memory.get("active_trades", [])):
+            if trade["id"] == trade_id:
+                # Calculate final PnL
+                entry = trade["entry_price"]
+                direction = trade["direction"]
+                
+                if direction == "LONG":
+                    pnl = (exit_price - entry) * trade["size"]
+                    pnl_pct = ((exit_price - entry) / entry) * 100
+                else:
+                    pnl = (entry - exit_price) * trade["size"]
+                    pnl_pct = ((entry - exit_price) / entry) * 100
+                
+                # Update trade record
+                trade["status"] = "CLOSED"
+                trade["exit_price"] = exit_price
+                trade["exit_time"] = datetime.datetime.now().isoformat()
+                trade["exit_reason"] = reason
+                trade["realized_pnl"] = round(pnl, 2)
+                trade["realized_pnl_pct"] = round(pnl_pct, 2)
+                trade["result"] = "WIN" if pnl > 0 else "LOSS" if pnl < 0 else "BREAKEVEN"
+                
+                # Move to closed trades
+                self.memory["active_trades"].pop(i)
+                self.memory["closed_trades"].append(trade)
+                self.memory["total_pnl"] = round(
+                    self.memory.get("total_pnl", 0) + pnl, 2
+                )
+                
+                # Update win/loss stats
+                if trade["result"] == "WIN":
+                    self.memory["total_wins"] = self.memory.get("total_wins", 0) + 1
+                    self.memory["win_streak"] = self.memory.get("win_streak", 0) + 1
+                    self.memory["loss_streak"] = 0
+                elif trade["result"] == "LOSS":
+                    self.memory["total_losses"] = self.memory.get("total_losses", 0) + 1
+                    self.memory["loss_streak"] = self.memory.get("loss_streak", 0) + 1
+                    self.memory["win_streak"] = 0
+                
+                self._save_memory()
+                self.logger.info(
+                    f"[TRADE] Closed #{trade_id} @ ${exit_price:.2f} | "
+                    f"PnL: ${pnl:.2f} ({pnl_pct:+.2f}%) | {trade['result']}"
+                )
+                return trade
+        
+        return None
+
+    def update_trailing_stop(self, trade_id: int, new_stop: float) -> bool:
+        """Update trailing stop for an active trade."""
+        for trade in self.memory.get("active_trades", []):
+            if trade["id"] == trade_id:
+                old_stop = trade["stop_loss"]
+                trade["stop_loss"] = new_stop
+                trade["trailing_stop"] = new_stop
+                self._save_memory()
+                self.logger.info(f"[TRADE] Updated SL for #{trade_id}: ${old_stop:.2f} -> ${new_stop:.2f}")
+                return True
+        return False
+
+    def get_active_trades(self) -> List[Dict]:
+        """Get all active trade positions."""
+        return self.memory.get("active_trades", [])
+
+    def get_trade_summary(self) -> Dict:
+        """Get trading performance summary."""
+        closed = self.memory.get("closed_trades", [])
+        active = self.memory.get("active_trades", [])
+        
+        total_trades = len(closed)
+        wins = sum(1 for t in closed if t.get("result") == "WIN")
+        losses = sum(1 for t in closed if t.get("result") == "LOSS")
+        
+        return {
+            "total_trades": total_trades,
+            "active_positions": len(active),
+            "wins": wins,
+            "losses": losses,
+            "win_rate": (wins / total_trades * 100) if total_trades > 0 else 0,
+            "total_pnl": self.memory.get("total_pnl", 0),
+            "win_streak": self.memory.get("win_streak", 0),
+            "loss_streak": self.memory.get("loss_streak", 0)
+        }
+
+    # ------------------------------------------
+    # Legacy Performance Grading
+    # ------------------------------------------
 
     def grade_performance(self, current_gold_price: float) -> str:
         """Check if the previous run's bias was correct and update statistics."""
@@ -758,7 +963,7 @@ class QuantEngine:
 class Strategist:
     """
     AI-powered market analysis using Google Gemini.
-    Generates trading insights based on technical data and intermarket correlations.
+    Generates sophisticated trading insights matching institutional-grade analysis.
     """
     
     def __init__(
@@ -769,6 +974,7 @@ class Strategist:
         news: List[str],
         memory_log: str,
         model: Optional[Any] = None,
+        cortex: Optional['Cortex'] = None,
     ):
         self.config = config
         self.logger = logger
@@ -776,26 +982,21 @@ class Strategist:
         self.news = news
         self.memory = memory_log
         self.model = model
+        self.cortex = cortex
 
     def think(self) -> Tuple[str, str]:
         """Generate AI analysis and extract trading bias."""
         self.logger.info("AI Strategist analyzing correlations & volatility...")
-        self.logger.info(f"[AI] Analyzing Correlations & Volatility...")
         
-        # Validate required data
         if 'GOLD' not in self.data:
             self.logger.error("Gold data missing - cannot generate analysis")
             return "Error: Gold data unavailable", "NEUTRAL"
         
-        # Construct the context
         gsr = self.data.get('RATIOS', {}).get('GSR', 'N/A')
         vix_data = self.data.get('VIX', {})
         vix_price = vix_data.get('price', 'N/A')
         
-        # Build data summary
         data_dump = self._format_data_summary()
-        
-        # Generate prompt
         prompt = self._build_prompt(gsr, vix_price, data_dump)
         
         try:
@@ -804,9 +1005,7 @@ class Strategist:
             response = self.model.generate_content(prompt)
             response_text = response.text
             
-            # Extract bias using more robust parsing
             bias = self._extract_bias(response_text)
-            
             self.logger.info(f"AI analysis complete. Bias: {bias}")
             return response_text, bias
             
@@ -824,97 +1023,186 @@ class Strategist:
                 continue
             
             price = values.get('price', 'N/A')
+            change = values.get('change', 0)
             rsi = values.get('rsi', 'N/A')
             adx = values.get('adx', 'N/A')
             regime = values.get('regime', 'N/A')
             atr = values.get('atr', 'N/A')
+            sma200 = values.get('sma200', 'N/A')
+            
+            trend_vs_sma = ""
+            if price != 'N/A' and sma200 and sma200 != 'N/A':
+                if price > sma200:
+                    trend_vs_sma = "ABOVE 200SMA"
+                else:
+                    trend_vs_sma = "BELOW 200SMA"
             
             lines.append(
-                f"[{key}] Price:${price} | RSI:{rsi} | ADX:{adx} ({regime}) | ATR:${atr}"
+                f"* {key}: ${price} ({change:+.2f}%) | RSI: {rsi} | ADX: {adx} ({regime}) | ATR: ${atr} | {trend_vs_sma}"
             )
         
         return "\n".join(lines)
 
+    def _get_active_trades_context(self) -> str:
+        """Format active trades for AI context."""
+        if not self.cortex:
+            return "No active positions."
+        
+        trades = self.cortex.get_active_trades()
+        if not trades:
+            return "No active positions."
+        
+        lines = ["Current Active Positions:"]
+        for t in trades:
+            lines.append(
+                f"* Trade #{t['id']}: {t['direction']} @ ${t['entry_price']:.2f} | "
+                f"SL: ${t['stop_loss']:.2f} | TP: {t['take_profit']} | "
+                f"Unrealized: ${t.get('unrealized_pnl', 0):.2f} ({t.get('unrealized_pnl_pct', 0):+.2f}%)"
+            )
+        return "\n".join(lines)
+
     def _build_prompt(self, gsr: Any, vix_price: Any, data_dump: str) -> str:
-        """Build the AI analysis prompt."""
-        gold_atr = self.data.get('GOLD', {}).get('atr', 0) or 0
-        atr_stop = float(gold_atr) * 2
+        """Build sophisticated AI analysis prompt matching institutional style."""
+        gold_data = self.data.get('GOLD', {})
+        gold_price = gold_data.get('price', 0)
+        gold_atr = gold_data.get('atr', 0) or 0
+        gold_rsi = gold_data.get('rsi', 50)
+        gold_adx = gold_data.get('adx', 0)
+        
+        atr_stop_width = float(gold_atr) * 2
+        suggested_sl = gold_price - atr_stop_width if gold_price else 0
+        suggested_tp1 = gold_price + (atr_stop_width * 1.5) if gold_price else 0
+        suggested_tp2 = gold_price + (atr_stop_width * 3) if gold_price else 0
+        
+        # Determine regime
+        regime = "TRENDING" if gold_adx and gold_adx > self.config.ADX_TREND_THRESHOLD else "RANGE-BOUND/CHOPPY"
+        
+        # Get active trades context
+        trades_context = self._get_active_trades_context()
         
         return f"""
-        Identity: Advanced Quant Algo "Gold Standard".
-        Context: You are analyzing markets for a Hedge Fund.
-        
-        SYSTEM MEMORY (Self-Reflection):
-        {self.memory}
-        (If you LOST last time, be more cautious. If you WON, maintain logic).
+You are "Gold Standard" - an elite quantitative trading algorithm operating for a sophisticated hedge fund.
+Your analysis must be precise, actionable, and reflect deep market understanding.
 
-        ### QUANT METRICS:
-        Gold/Silver Ratio: {gsr} (High > {self.config.GSR_HIGH_THRESHOLD} = Silver Cheap, Low < {self.config.GSR_LOW_THRESHOLD} = Gold Cheap)
-        VIX (Fear): {vix_price} (High > {self.config.VIX_HIGH_THRESHOLD} = High Volatility Risk)
-        
-        ### ASSET TELEMETRY:
-        {data_dump}
-        
-        ### NEWS CONTEXT:
-        {chr(10).join(self.news[:4]) if self.news else "No recent news available."}
+=== SYSTEM STATE ===
+Performance Memory:
+{self.memory}
 
-        ### INSTRUCTIONS:
-        1. **Regime Detection:** Look at ADX. If < {self.config.ADX_TREND_THRESHOLD}, declare "Range-Bound". If > {self.config.ADX_TREND_THRESHOLD}, declare "Trending".
-        2. **Volatility Sizing:** Use the ATR provided to calculate Stop Loss width. (e.g., Stop = 2 * ATR).
-        3. **Correlation Check:** If DXY is UP and Gold is UP, note the "Safe Haven Divergence".
-        4. **Bias:** Must be BULLISH, BEARISH, or NEUTRAL.
+Active Positions:
+{trades_context}
 
-        ### OUTPUT FORMAT (MARKDOWN):
-        # Gold Standard Quant Report
-        
-        ## 1. Algo Self-Correction
-        *   **Previous Call:** (Reflect on the memory provided)
-        *   **Current Stance:** (Adjusted based on recent performance)
+=== MARKET TELEMETRY ===
+{data_dump}
 
-        ## 2. Macro & Intermarket
-        *   **Regime:** (Trending or Ranging based on ADX?)
-        *   **Gold/Silver Ratio:** (Analysis of {gsr})
-        *   **VIX/Risk:** (Impact of VIX {vix_price})
+Intermarket Ratios:
+* Gold/Silver Ratio (GSR): {gsr} (>85 = Silver undervalued; <75 = Gold undervalued)
+* VIX (Fear Gauge): {vix_price} (>20 = Elevated volatility/risk-off; <15 = Complacency)
 
-        ## 3. Strategic Thesis
-        *   **Bias:** **[BULLISH/BEARISH/NEUTRAL]** (Choose exactly one and put it in bold)
-        *   **Logic:** ...
+Current Regime Detection: {regime} (ADX: {gold_adx})
 
-        ## 4. Precision Execution (ATR Based)
-        *   **Entry Zone:** Current Price +/- volatility
-        *   **Volatility Stop (2x ATR):** ${atr_stop:.2f} width
-        *   **Stop Loss Level:** $...
-        *   **Take Profit:** $...
+=== NEWS CONTEXT ===
+{chr(10).join(['* ' + n for n in self.news[:5]]) if self.news else "No significant headlines."}
 
-        ## 5. Scenario Probability
-        (Create a Markdown Matrix Table)
-        """
+=== ANALYSIS FRAMEWORK ===
+
+Generate a comprehensive trading journal following this EXACT structure:
+
+# Gold Standard Quant Report
+## Date: {datetime.date.today().strftime('%B %d, %Y')}
+
+---
+
+## 1. Market Context
+Analyze the broader macro environment:
+* Fed policy expectations and rate probabilities
+* Dollar dynamics and their impact on commodities
+* Global liquidity conditions and risk appetite
+* Key macro themes driving precious metals
+
+## 2. Asset-Specific Analysis
+For Gold and the metals complex:
+* Current price action and technical structure
+* Trend strength (use ADX: {gold_adx})
+* Momentum readings (RSI: {gold_rsi})
+* Key support/resistance zones
+* Intermarket correlations (GSR, DXY relationship)
+
+## 3. Sentiment Summary
+* Institutional positioning (infer from price action)
+* Safe-haven demand dynamics
+* Market pulse (bullish/bearish/neutral sentiment)
+
+## 4. Strategic Thesis
+**Bias:** **[BULLISH/BEARISH/NEUTRAL]** (Choose ONE and make it bold)
+
+Provide clear rationale with:
+* Primary thesis (1-2 sentences)
+* Supporting factors (bullet points)
+* Invalidation conditions (what would change your view)
+
+## 5. Setup Scan & Trade Idea
+
+| Component | Specification |
+|-----------|---------------|
+| Direction | LONG / SHORT / FLAT |
+| Entry Zone | Price range for entry |
+| Stop Loss | ${suggested_sl:.2f} (2x ATR: ${atr_stop_width:.2f}) |
+| Target 1 | ${suggested_tp1:.2f} (1.5R) |
+| Target 2 | ${suggested_tp2:.2f} (3R) |
+| Position Sizing | Based on ATR volatility |
+
+Entry Conditions:
+* List specific conditions that must be met
+
+## 6. Scenario Probability Matrix
+
+| Scenario | Price Target | Probability | Key Drivers |
+|----------|-------------|-------------|-------------|
+| Bull Case | $X,XXX | XX% | List drivers |
+| Base Case | $X,XXX | XX% | List drivers |
+| Bear Case | $X,XXX | XX% | List drivers |
+
+## 7. Risk Management
+* Key levels to watch
+* Trailing stop strategy
+* Position adjustment triggers
+
+## 8. Algo Self-Reflection
+* Previous call assessment (from memory)
+* Lessons learned
+* Confidence calibration
+
+---
+*Generated by Gold Standard Quant Engine*
+"""
 
     def _extract_bias(self, text: str) -> str:
-        """
-        Extract trading bias from AI response using robust parsing.
-        Prioritizes explicit bias declarations over casual mentions.
-        """
+        """Extract trading bias from AI response using robust parsing."""
         text_upper = text.upper()
         
-        # Pattern for explicit bias declaration
         bias_patterns = [
             r'\*\*BIAS[:\*\s]*\*?\*?\s*\*?\*?(BULLISH|BEARISH|NEUTRAL)',
-            r'BIAS[:\s]+(BULLISH|BEARISH|NEUTRAL)',
+            r'BIAS[:\s]+\*?\*?(BULLISH|BEARISH|NEUTRAL)',
             r'\*\*(BULLISH|BEARISH|NEUTRAL)\*\*',
+            r'DIRECTION[:\s]+(LONG|SHORT|FLAT)',
         ]
         
         for pattern in bias_patterns:
             match = re.search(pattern, text_upper)
             if match:
-                return match.group(1)
+                result = match.group(1)
+                if result == "LONG":
+                    return "BULLISH"
+                elif result == "SHORT":
+                    return "BEARISH"
+                elif result == "FLAT":
+                    return "NEUTRAL"
+                return result
         
-        # Fallback: count occurrences but weight by context
-        bullish_count = text_upper.count("BULLISH")
-        bearish_count = text_upper.count("BEARISH")
-        neutral_count = text_upper.count("NEUTRAL")
+        bullish_count = text_upper.count("BULLISH") + text_upper.count("LONG")
+        bearish_count = text_upper.count("BEARISH") + text_upper.count("SHORT")
+        neutral_count = text_upper.count("NEUTRAL") + text_upper.count("FLAT")
         
-        # Only return non-neutral if there's a clear preference
         if bullish_count > bearish_count and bullish_count > neutral_count:
             return "BULLISH"
         elif bearish_count > bullish_count and bearish_count > neutral_count:
@@ -962,7 +1250,13 @@ def execute(config: Config, logger: logging.Logger, model: Optional[Any] = None,
     last_result = cortex.grade_performance(gold_price)
     logger.info(f"[MEMORY] Last Run Result: {last_result}")
     
-    # 3. AI Analysis
+    # 3. Update active trades with current prices
+    triggered = cortex.update_trade_prices({'GOLD': gold_price})
+    for trade in triggered:
+        logger.info(f"[TRADE] Auto-closed: #{trade['id']} - {trade.get('exit_reason', 'TRIGGERED')}")
+        cortex.close_trade(trade['id'], gold_price, trade.get('exit_reason', 'AUTO'))
+
+    # 4. AI Analysis
     memory_context = cortex.get_formatted_history()
     report = ""
     new_bias = "NEUTRAL"
@@ -972,7 +1266,7 @@ def execute(config: Config, logger: logging.Logger, model: Optional[Any] = None,
         report = "# Gold Standard Quant Report\n\n[NO AI MODE] - AI analysis skipped by CLI option."
         new_bias = "NEUTRAL"
     else:
-        strat = Strategist(config, logger, data, quant.news, memory_context, model=model)
+        strat = Strategist(config, logger, data, quant.news, memory_context, model=model, cortex=cortex)
         report, new_bias = strat.think()
     
     # 4. Save Bias to Memory (unless dry-run)
