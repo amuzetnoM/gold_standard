@@ -12,7 +12,7 @@ Tests cover:
 import sys
 import os
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock
 import pytest
 
 # Add project root to path
@@ -20,10 +20,10 @@ root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root))
 
 # Load .env file for API keys
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 load_dotenv(root / ".env")
 
-from main import Config, setup_logging, Strategist
+from main import Config, setup_logging, Strategist  # noqa: E402
 
 
 class TestGeminiConfiguration:
@@ -375,7 +375,7 @@ class TestGeminiErrorHandling:
         cfg = Config()
         
         try:
-            model = genai.GenerativeModel(cfg.GEMINI_MODEL)
+            _model = genai.GenerativeModel(cfg.GEMINI_MODEL)  # noqa: F841
             # The model creation might succeed, but generation should fail
             # This depends on the API behavior
         except Exception:
