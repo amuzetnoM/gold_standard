@@ -69,6 +69,7 @@ class GoldStandardGUI:
         
         # State
         self.is_running = False
+        self.daemon_running = False
         self.process = None
         self.no_ai = tk.BooleanVar(value=False)
         self.selected_date = tk.StringVar(value=date.today().isoformat())
@@ -319,6 +320,28 @@ class GoldStandardGUI:
                  pady=6,
                  cursor='hand2',
                  command=self._run_premarket).pack(side=tk.LEFT)
+        
+        # Daemon mode button
+        daemon_frame = tk.Frame(run_panel, bg=t.BG_PANEL)
+        daemon_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        self.daemon_btn = tk.Button(daemon_frame,
+                                   text="⚡ START DAEMON",
+                                   bg=t.BG_CARD,
+                                   fg=t.GREEN,
+                                   font=('Segoe UI', 10, 'bold'),
+                                   bd=0,
+                                   padx=15,
+                                   pady=8,
+                                   cursor='hand2',
+                                   command=self._toggle_daemon)
+        self.daemon_btn.pack(fill=tk.X)
+        
+        tk.Label(daemon_frame,
+                text="Auto-runs every 4 hours",
+                bg=t.BG_PANEL,
+                fg=t.TEXT_DIM,
+                font=('Segoe UI', 8)).pack(pady=(3, 0))
         
         # === STATUS SECTION ===
         status_panel = tk.Frame(parent, bg=t.BG_PANEL, padx=15, pady=15)
@@ -971,6 +994,75 @@ class GoldStandardGUI:
         thread = threading.Thread(target=self._run_subprocess, args=("--premarket",))
         thread.daemon = True
         thread.start()
+
+    def _toggle_daemon(self):
+        """Toggle daemon mode on/off."""
+        t = self.theme
+        
+        if self.daemon_running:
+            # Stop daemon
+            if self.process:
+                self.process.terminate()
+                self.process = None
+            self.daemon_running = False
+            self.daemon_btn.config(text="⚡ START DAEMON", fg=t.GREEN, bg=t.BG_CARD)
+            self._set_status("● Daemon Stopped", t.TEXT_DIM)
+            self._log("[DAEMON] Autonomous mode stopped")
+        else:
+            # Start daemon
+            if self.is_running:
+                messagebox.showwarning("Running", "Wait for current analysis to finish.")
+                return
+            
+            self.daemon_running = True
+            self.daemon_btn.config(text="■ STOP DAEMON", fg=t.RED, bg=t.BG_HOVER)
+            self._set_status("● Daemon Active", t.GREEN)
+            self._log("[DAEMON] Starting autonomous mode (4-hour interval)...")
+            
+            thread = threading.Thread(target=self._run_daemon_subprocess)
+            thread.daemon = True
+            thread.start()
+
+    def _run_daemon_subprocess(self):
+        """Run the daemon subprocess."""
+        try:
+            cmd = [sys.executable, str(PROJECT_ROOT / "run.py")]
+            if self.no_ai.get():
+                cmd.append("--no-ai")
+            
+            env = os.environ.copy()
+            env['PYTHONIOENCODING'] = 'utf-8'
+            
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=str(PROJECT_ROOT),
+                env=env,
+                encoding='utf-8',
+                errors='replace'
+            )
+            
+            for line in iter(self.process.stdout.readline, ''):
+                if line:
+                    self.root.after(0, self._log, line.rstrip())
+            
+            self.process.wait()
+            self.root.after(0, self._daemon_stopped)
+            
+        except Exception as e:
+            self.root.after(0, self._log, f"[DAEMON] Error: {e}")
+            self.root.after(0, self._daemon_stopped)
+
+    def _daemon_stopped(self):
+        """Handle daemon process ending."""
+        t = self.theme
+        self.daemon_running = False
+        self.daemon_btn.config(text="⚡ START DAEMON", fg=t.GREEN, bg=t.BG_CARD)
+        self._set_status("● Daemon Stopped", t.TEXT_DIM)
+        self._log("[DAEMON] Process ended")
 
     def _run_subprocess(self, mode: str):
         """Run the analysis subprocess."""
