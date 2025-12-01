@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gold Standard | Precious Metals Intelligence Complex</title>
+    <meta name="description" content="Quantitative analysis system combining real-time market data, technical indicators, and Google Gemini AI for gold trading insights.">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥇</text></svg>">
+    
+    <style>
+        :root {
+            --gold: #FFD700;
+            --gold-dark: #B8860B;
+            --gold-light: #FFF8DC;
+            --bg-dark: #0a0a0f;
+            --bg-card: #12121a;
+            --bg-card-hover: #1a1a25;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0b0;
+            --text-muted: #6b6b7b;
+            --border: #2a2a3a;
+            --success: #10b981;
+            --info: #3b82f6;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --gradient-gold: linear-gradient(135deg, #FFD700 0%, #FFA500 50%, #B8860B 100%);
+            --gradient-dark: linear-gradient(180deg, #0a0a0f 0%, #12121a 100%);
+            --shadow-gold: 0 0 60px rgba(255, 215, 0, 0.15);
+            --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-dark);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--gold-dark);
+        }
+
+        /* Navigation */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            background: rgba(10, 10, 15, 0.9);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            padding: 0 2rem;
+        }
+
+        .nav-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 70px;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-weight: 700;
+            font-size: 1.25rem;
+            color: var(--gold);
+            text-decoration: none;
+        }
+
+        .nav-logo span {
+            background: var(--gradient-gold);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--gold);
+        }
+
+        .nav-cta {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .btn {
+            padding: 0.6rem 1.25rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-decoration: none;
+            transition: all 0.2s;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .btn-outline:hover {
+            border-color: var(--gold);
+            color: var(--gold);
+        }
+
+        .btn-primary {
+            background: var(--gradient-gold);
+            color: #000;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(255, 215, 0, 0.3);
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8rem 2rem 4rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 50% 50%, rgba(255, 215, 0, 0.03) 0%, transparent 50%);
+            animation: pulse 15s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+
+        .hero-content {
+            max-width: 900px;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: rgba(255, 215, 0, 0.1);
+            border: 1px solid rgba(255, 215, 0, 0.2);
+            border-radius: 50px;
+            font-size: 0.85rem;
+            color: var(--gold);
+            margin-bottom: 2rem;
+        }
+
+        .hero-badge::before {
+            content: '🥇';
+        }
+
+        .hero h1 {
+            font-size: clamp(3rem, 8vw, 5rem);
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, #fff 0%, #FFD700 50%, #fff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            max-width: 700px;
+            margin: 0 auto 2.5rem;
+            line-height: 1.7;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 3rem;
+        }
+
+        .hero-buttons .btn {
+            padding: 0.9rem 2rem;
+            font-size: 1rem;
+        }
+
+        /* Badges */
+        .badges {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .badges img {
+            height: 28px;
+            border-radius: 4px;
+        }
+
+        /* Section Styles */
+        section {
+            padding: 6rem 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .section-header {
+            text-align: center;
+            max-width: 700px;
+            margin: 0 auto 4rem;
+        }
+
+        .section-label {
+            display: inline-block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--gold);
+            margin-bottom: 1rem;
+        }
+
+        .section-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            background: var(--bg-card-hover);
+            border-color: rgba(255, 215, 0, 0.3);
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-card);
+        }
+
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            background: rgba(255, 215, 0, 0.1);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.15rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* Architecture Section */
+        .architecture {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 3rem;
+            margin-top: 2rem;
+        }
+
+        .arch-diagram {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .arch-box {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+        }
+
+        .arch-box h4 {
+            color: var(--gold);
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+        }
+
+        .arch-box ul {
+            list-style: none;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .arch-box li {
+            padding: 0.25rem 0;
+        }
+
+        .arch-arrow {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--gold);
+            font-size: 1.5rem;
+        }
+
+        /* Code Block */
+        .code-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+            margin: 2rem 0;
+        }
+
+        .code-header {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .code-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .code-dot.red { background: #ff5f57; }
+        .code-dot.yellow { background: #febc2e; }
+        .code-dot.green { background: #28c840; }
+
+        .code-title {
+            margin-left: 1rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        pre {
+            padding: 1.5rem;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        code {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .code-comment { color: #6b7280; }
+        .code-keyword { color: #c084fc; }
+        .code-string { color: #34d399; }
+        .code-cmd { color: #60a5fa; }
+
+        /* Charts Gallery */
+        .charts-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .chart-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+
+        .chart-card:hover {
+            border-color: rgba(255, 215, 0, 0.3);
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-card);
+        }
+
+        .chart-card img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .chart-info {
+            padding: 1.25rem;
+        }
+
+        .chart-info h4 {
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .chart-info span {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem;
+            margin: 3rem 0;
+        }
+
+        .stat-card {
+            text-align: center;
+            padding: 2rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: var(--gradient-gold);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        /* Table Styles */
+        .table-wrapper {
+            overflow-x: auto;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th {
+            background: rgba(255, 215, 0, 0.1);
+            color: var(--gold);
+            text-align: left;
+            padding: 1rem 1.25rem;
+            font-weight: 600;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        td {
+            padding: 1rem 1.25rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        td code {
+            background: rgba(255, 215, 0, 0.1);
+            color: var(--gold);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        /* Quick Start Steps */
+        .steps {
+            display: grid;
+            gap: 1.5rem;
+        }
+
+        .step {
+            display: flex;
+            gap: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+        }
+
+        .step-number {
+            flex-shrink: 0;
+            width: 48px;
+            height: 48px;
+            background: var(--gradient-gold);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.25rem;
+            color: #000;
+        }
+
+        .step-content h4 {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .step-content p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* Footer */
+        footer {
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            padding: 4rem 2rem 2rem;
+            margin-top: 4rem;
+        }
+
+        .footer-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr;
+            gap: 3rem;
+        }
+
+        .footer-brand h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            background: var(--gradient-gold);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .footer-brand p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.7;
+        }
+
+        .footer-links h4 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 1.25rem;
+            color: var(--text-primary);
+        }
+
+        .footer-links ul {
+            list-style: none;
+        }
+
+        .footer-links li {
+            margin-bottom: 0.75rem;
+        }
+
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover {
+            color: var(--gold);
+        }
+
+        .footer-bottom {
+            max-width: 1400px;
+            margin: 3rem auto 0;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .footer-content {
+                grid-template-columns: 1fr 1fr;
+            }
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .arch-diagram {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .nav-links, .nav-cta {
+                display: none;
+            }
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+            .section-title {
+                font-size: 2rem;
+            }
+            .footer-content {
+                grid-template-columns: 1fr;
+                text-align: center;
+            }
+            .footer-bottom {
+                flex-direction: column;
+                gap: 1rem;
+            }
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate {
+            animation: fadeInUp 0.6s ease-out forwards;
+        }
+
+        .delay-1 { animation-delay: 0.1s; }
+        .delay-2 { animation-delay: 0.2s; }
+        .delay-3 { animation-delay: 0.3s; }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav>
+        <div class="nav-container">
+            <a href="#" class="nav-logo">
+                🥇 <span>Gold Standard</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#quickstart">Quick Start</a></li>
+                <li><a href="#charts">Charts</a></li>
+                <li><a href="#architecture">Architecture</a></li>
+                <li><a href="#docs">Documentation</a></li>
+            </ul>
+            <div class="nav-cta">
+                <a href="https://github.com/amuzetnoM/gold_standard" class="btn btn-outline">GitHub</a>
+                <a href="#quickstart" class="btn btn-primary">Get Started</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <div class="hero-badge">Precious Metals Intelligence Complex</div>
+            <h1>Gold Standard</h1>
+            <p class="hero-subtitle">
+                A comprehensive quantitative analysis system combining real-time market data, 
+                technical indicators, economic calendar intelligence, and Google Gemini AI 
+                to generate structured trading reports for gold and intermarket assets.
+            </p>
+            <div class="hero-buttons">
+                <a href="#quickstart" class="btn btn-primary">Get Started →</a>
+                <a href="https://github.com/amuzetnoM/gold_standard" class="btn btn-outline">View on GitHub</a>
+            </div>
+            <div class="badges">
+                <img src="https://img.shields.io/github/actions/workflow/status/amuzetnoM/gold_standard/python-ci.yml?branch=main&style=for-the-badge&logo=github&logoColor=white&label=CI" alt="CI Status">
+                <img src="https://img.shields.io/badge/tests-29%20passing-success?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests">
+                <img src="https://img.shields.io/badge/python-3.10--3.13-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+                <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License">
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats -->
+    <section>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">6</div>
+                <div class="stat-label">Assets Tracked</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">29</div>
+                <div class="stat-label">Tests Passing</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">4h</div>
+                <div class="stat-label">Auto Analysis</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">AI</div>
+                <div class="stat-label">Gemini Powered</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features">
+        <div class="section-header">
+            <span class="section-label">Features</span>
+            <h2 class="section-title">Everything You Need for Gold Analysis</h2>
+            <p class="section-desc">A complete toolkit for quantitative precious metals analysis with AI-powered insights.</p>
+        </div>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🤖</div>
+                <h3>Autonomous Daemon</h3>
+                <p>Runs continuously, executing comprehensive analysis every 4 hours. Fully configurable scheduling.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>Multi-Asset Analysis</h3>
+                <p>Track Gold, Silver, Dollar Index (DXY), US 10Y Yield, VIX, and S&P 500 with intermarket correlations.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📈</div>
+                <h3>Technical Indicators</h3>
+                <p>RSI, ADX, ATR, SMA (50/200) with pandas_ta + numba acceleration for fast computation.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🧠</div>
+                <h3>AI-Powered Insights</h3>
+                <p>Google Gemini integration generates natural-language analysis and strategic bias extraction.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📅</div>
+                <h3>Economic Calendar</h3>
+                <p>Self-maintaining calendar with Fed, ECB, NFP, CPI events and gold impact analysis.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🏦</div>
+                <h3>Institutional Tracking</h3>
+                <p>Monitor central bank purchases, ETF flows, and institutional positioning.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">💾</div>
+                <h3>Persistent Memory</h3>
+                <p>Cortex system tracks predictions, grades performance, and maintains win/loss streaks.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📱</div>
+                <h3>Dual Interface</h3>
+                <p>Command-line CLI for power users and graphical GUI dashboard for visual monitoring.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔌</div>
+                <h3>No-AI Mode</h3>
+                <p>Run data analysis without API calls for testing, development, or offline use.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Start -->
+    <section id="quickstart">
+        <div class="section-header">
+            <span class="section-label">Quick Start</span>
+            <h2 class="section-title">Up and Running in Minutes</h2>
+            <p class="section-desc">Get started with automated setup scripts for Windows, macOS, and Linux.</p>
+        </div>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>Clone the Repository</h4>
+                    <p>Clone Gold Standard from GitHub to your local machine.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>Run Setup Script</h4>
+                    <p>Execute the automated setup script for your platform. It handles Python, venv, and dependencies.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>Add API Key</h4>
+                    <p>Edit .env and add your GEMINI_API_KEY from Google AI Studio (free tier available).</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h4>Launch</h4>
+                    <p>Run the CLI or GUI and start receiving AI-powered gold analysis.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="code-section">
+            <div class="code-header">
+                <div class="code-dot red"></div>
+                <div class="code-dot yellow"></div>
+                <div class="code-dot green"></div>
+                <span class="code-title">Terminal</span>
+            </div>
+            <pre><code><span class="code-comment"># Clone repository</span>
+<span class="code-cmd">git clone</span> https://github.com/amuzetnoM/gold_standard.git
+<span class="code-cmd">cd</span> gold_standard
+
+<span class="code-comment"># Windows PowerShell</span>
+.\scripts\setup.ps1
+
+<span class="code-comment"># Unix/macOS/Linux</span>
+chmod +x scripts/setup.sh && ./scripts/setup.sh
+
+<span class="code-comment"># Quick test (no AI required)</span>
+<span class="code-cmd">python</span> run.py --mode daily --no-ai
+
+<span class="code-comment"># Full run with AI</span>
+<span class="code-cmd">python</span> run.py
+
+<span class="code-comment"># Or launch GUI</span>
+<span class="code-cmd">python</span> gui.py</code></pre>
+        </div>
+    </section>
+
+    <!-- Charts Gallery -->
+    <section id="charts">
+        <div class="section-header">
+            <span class="section-label">Output</span>
+            <h2 class="section-title">Professional Chart Generation</h2>
+            <p class="section-desc">Automated candlestick charts with technical overlays for all tracked assets.</p>
+        </div>
+
+        <div class="charts-gallery">
+            <div class="chart-card">
+                <img src="images/GOLD.png" alt="Gold Chart" onerror="this.src='https://via.placeholder.com/400x200/12121a/FFD700?text=GOLD'">
+                <div class="chart-info">
+                    <h4>Gold (GC=F)</h4>
+                    <span>Primary Asset • SMA 50/200</span>
+                </div>
+            </div>
+            <div class="chart-card">
+                <img src="images/SILVER.png" alt="Silver Chart" onerror="this.src='https://via.placeholder.com/400x200/12121a/C0C0C0?text=SILVER'">
+                <div class="chart-info">
+                    <h4>Silver (SI=F)</h4>
+                    <span>Precious Metal • GSR Ratio</span>
+                </div>
+            </div>
+            <div class="chart-card">
+                <img src="images/DXY.png" alt="DXY Chart" onerror="this.src='https://via.placeholder.com/400x200/12121a/3b82f6?text=DXY'">
+                <div class="chart-info">
+                    <h4>Dollar Index (DXY)</h4>
+                    <span>Inverse Correlation</span>
+                </div>
+            </div>
+            <div class="chart-card">
+                <img src="images/YIELD.png" alt="Yield Chart" onerror="this.src='https://via.placeholder.com/400x200/12121a/10b981?text=YIELD'">
+                <div class="chart-info">
+                    <h4>US 10Y Yield (^TNX)</h4>
+                    <span>Rate Sensitivity</span>
+                </div>
+            </div>
+            <div class="chart-card">
+                <img src="images/VIX.png" alt="VIX Chart" onerror="this.src='https://via.placeholder.com/400x200/12121a/ef4444?text=VIX'">
+                <div class="chart-info">
+                    <h4>VIX (^VIX)</h4>
+                    <span>Volatility Index</span>
+                </div>
+            </div>
+            <div class="chart-card">
+                <img src="images/SPX.png" alt="SPX Chart" onerror="this.src='https://via.placeholder.com/400x200/12121a/f59e0b?text=SPX'">
+                <div class="chart-info">
+                    <h4>S&P 500 (^GSPC)</h4>
+                    <span>Risk Sentiment</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Architecture -->
+    <section id="architecture">
+        <div class="section-header">
+            <span class="section-label">Architecture</span>
+            <h2 class="section-title">Modular Design</h2>
+            <p class="section-desc">Clean separation of concerns for maintainability and extensibility.</p>
+        </div>
+
+        <div class="architecture">
+            <div class="arch-diagram">
+                <div class="arch-box">
+                    <h4>Cortex</h4>
+                    <ul>
+                        <li>Memory JSON</li>
+                        <li>Win/Loss Tracking</li>
+                        <li>Predictions</li>
+                    </ul>
+                </div>
+                <div class="arch-box">
+                    <h4>QuantEngine</h4>
+                    <ul>
+                        <li>yfinance Data</li>
+                        <li>RSI, SMA, ATR</li>
+                        <li>mplfinance Charts</li>
+                    </ul>
+                </div>
+                <div class="arch-box">
+                    <h4>Strategist</h4>
+                    <ul>
+                        <li>Prompt Builder</li>
+                        <li>Gemini API</li>
+                        <li>Bias Extraction</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="arch-diagram">
+                <div class="arch-box">
+                    <h4>DBManager</h4>
+                    <ul>
+                        <li>SQLite Storage</li>
+                        <li>Report Queries</li>
+                        <li>History Access</li>
+                    </ul>
+                </div>
+                <div class="arch-box">
+                    <h4>LiveAnalyzer</h4>
+                    <ul>
+                        <li>Catalyst Watch</li>
+                        <li>Institutional Matrix</li>
+                        <li>1Y/3M Analysis</li>
+                    </ul>
+                </div>
+                <div class="arch-box">
+                    <h4>EconomicCalendar</h4>
+                    <ul>
+                        <li>Fed/ECB/BOJ</li>
+                        <li>NFP/CPI/GDP</li>
+                        <li>Gold Impact</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Commands Reference -->
+    <section id="docs">
+        <div class="section-header">
+            <span class="section-label">Reference</span>
+            <h2 class="section-title">Command Reference</h2>
+            <p class="section-desc">All available CLI commands and options.</p>
+        </div>
+
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Command</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>python run.py</code></td>
+                        <td>Autonomous daemon - runs every 4 hours</td>
+                    </tr>
+                    <tr>
+                        <td><code>python run.py --interval 6</code></td>
+                        <td>Daemon with 6-hour interval</td>
+                    </tr>
+                    <tr>
+                        <td><code>python run.py --once</code></td>
+                        <td>Single run and exit</td>
+                    </tr>
+                    <tr>
+                        <td><code>python run.py --run</code></td>
+                        <td>Run all analysis once</td>
+                    </tr>
+                    <tr>
+                        <td><code>python run.py --daily</code></td>
+                        <td>Quick daily journal only</td>
+                    </tr>
+                    <tr>
+                        <td><code>python run.py --interactive</code></td>
+                        <td>Interactive menu mode</td>
+                    </tr>
+                    <tr>
+                        <td><code>python run.py --no-ai</code></td>
+                        <td>Run without Gemini API</td>
+                    </tr>
+                    <tr>
+                        <td><code>python gui.py</code></td>
+                        <td>Launch GUI dashboard</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <div class="footer-brand">
+                <h3>🥇 Gold Standard</h3>
+                <p>Precious Metals Intelligence Complex — Quantitative Analysis System for gold and intermarket assets.</p>
+            </div>
+            <div class="footer-links">
+                <h4>Documentation</h4>
+                <ul>
+                    <li><a href="#quickstart">Quick Start</a></li>
+                    <li><a href="GUIDE.md">Technical Guide</a></li>
+                    <li><a href="#architecture">Architecture</a></li>
+                    <li><a href="#docs">API Reference</a></li>
+                </ul>
+            </div>
+            <div class="footer-links">
+                <h4>Community</h4>
+                <ul>
+                    <li><a href="https://github.com/amuzetnoM/gold_standard">GitHub</a></li>
+                    <li><a href="https://github.com/amuzetnoM/gold_standard/issues">Issues</a></li>
+                    <li><a href="https://github.com/amuzetnoM/gold_standard/blob/main/CONTRIBUTING.md">Contributing</a></li>
+                    <li><a href="https://github.com/amuzetnoM/gold_standard/blob/main/LICENSE">License</a></li>
+                </ul>
+            </div>
+            <div class="footer-links">
+                <h4>Tech Stack</h4>
+                <ul>
+                    <li><a href="https://www.python.org/">Python 3.10+</a></li>
+                    <li><a href="https://ai.google.dev/">Google Gemini</a></li>
+                    <li><a href="https://pandas.pydata.org/">pandas</a></li>
+                    <li><a href="https://github.com/twopirllc/pandas-ta">pandas_ta</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <span>© 2025 Gold Standard. MIT License.</span>
+            <span>Built with 🥇 for traders</span>
+        </div>
+    </footer>
+
+    <script>
+        // Smooth scroll for navigation links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Navbar background on scroll
+        window.addEventListener('scroll', () => {
+            const nav = document.querySelector('nav');
+            if (window.scrollY > 50) {
+                nav.style.background = 'rgba(10, 10, 15, 0.98)';
+            } else {
+                nav.style.background = 'rgba(10, 10, 15, 0.9)';
+            }
+        });
+
+        // Animate elements on scroll
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('animate');
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.feature-card, .step, .chart-card, .stat-card').forEach(el => {
+            observer.observe(el);
+        });
+    </script>
+</body>
+</html>
