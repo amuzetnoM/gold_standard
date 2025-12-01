@@ -3,11 +3,18 @@
 Gold Standard CLI
 Unified entry point with intelligent report management.
 Runs all analysis with automatic redundancy control.
+
+Default mode: Autonomous daemon that runs analysis every 4 hours.
+Use --once for single execution, or --interactive for menu.
 """
 import os
 import sys
 import argparse
+import signal
+import time
 from datetime import date
+
+import schedule
 
 # Add project root to path
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -185,6 +192,61 @@ def run_all(no_ai: bool = False, force: bool = False):
     return all(results.values())
 
 
+# Global flag for graceful shutdown
+_shutdown_requested = False
+
+def _signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    global _shutdown_requested
+    print("\n\n  [SHUTDOWN] Signal received, stopping gracefully...")
+    _shutdown_requested = True
+
+
+def run_daemon(no_ai: bool = False, interval_hours: int = 4):
+    """
+    Run Gold Standard as an autonomous daemon.
+    Executes analysis immediately, then every interval_hours.
+    
+    Args:
+        no_ai: Disable AI-generated content
+        interval_hours: Hours between analysis runs (default: 4)
+    """
+    global _shutdown_requested
+    
+    # Register signal handlers
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+    
+    print("\n" + "=" * 60)
+    print("       GOLD STANDARD - AUTONOMOUS MODE")
+    print("=" * 60)
+    print(f"  Interval: Every {interval_hours} hours")
+    print(f"  AI Mode:  {'Disabled' if no_ai else 'Enabled'}")
+    print("  Press Ctrl+C to shutdown gracefully")
+    print("=" * 60 + "\n")
+    
+    # Run immediately on startup
+    print("[DAEMON] Running initial analysis cycle...\n")
+    run_all(no_ai=no_ai, force=False)
+    
+    # Schedule recurring runs
+    schedule.every(interval_hours).hours.do(run_all, no_ai=no_ai, force=False)
+    
+    print(f"\n[DAEMON] Next run scheduled in {interval_hours} hours")
+    print("[DAEMON] System is now running autonomously...\n")
+    
+    # Main loop
+    while not _shutdown_requested:
+        try:
+            schedule.run_pending()
+            time.sleep(1)
+        except Exception as e:
+            print(f"[DAEMON] Error in main loop: {e}")
+            time.sleep(5)
+    
+    print("\n[DAEMON] Shutdown complete. Goodbye!\n")
+
+
 def interactive_mode(no_ai: bool = False):
     """Simplified interactive menu."""
     
@@ -252,16 +314,17 @@ def interactive_mode(no_ai: bool = False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Gold Standard CLI - Intelligent precious metals analysis with redundancy control.",
+        description="Gold Standard CLI - Autonomous precious metals analysis system. Runs continuously by default.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run.py                  # Interactive menu
-  python run.py --run            # Run all analysis with auto redundancy check
-  python run.py --run --force    # Force regenerate all reports
-  python run.py --daily          # Quick daily journal only
+  python run.py                  # Autonomous daemon mode (default)
+  python run.py --once           # Single run and exit
+  python run.py --run            # Run all analysis once
+  python run.py --interval 6     # Daemon with 6-hour interval
+  python run.py --interactive    # Interactive menu
   python run.py --status         # Show current status
-  python run.py --run --no-ai    # Run all without AI
+  python run.py --no-ai          # Daemon without AI
         """
     )
     parser.add_argument('--run', '-r', action='store_true',
@@ -278,6 +341,10 @@ Examples:
                        help='Disable AI-generated content (Gemini)')
     parser.add_argument('--interactive', '-i', action='store_true',
                        help='Force interactive mode')
+    parser.add_argument('--once', action='store_true',
+                       help='Run once and exit (no daemon)')
+    parser.add_argument('--interval', type=int, default=4,
+                       help='Hours between daemon runs (default: 4)')
     
     # Legacy support for --mode
     parser.add_argument('--mode', '-m', choices=['daily', 'weekly', 'monthly', 'yearly', 'premarket'],
@@ -324,8 +391,14 @@ Examples:
         run_premarket(no_ai=args.no_ai)
         return
     
-    # Default: interactive mode
-    interactive_mode(no_ai=args.no_ai)
+    # Interactive mode if explicitly requested
+    if args.interactive:
+        interactive_mode(no_ai=args.no_ai)
+        return
+    
+    # Default: Autonomous daemon mode
+    print_banner()
+    run_daemon(no_ai=args.no_ai, interval_hours=args.interval)
 
 
 if __name__ == '__main__':
