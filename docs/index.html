@@ -795,12 +795,12 @@
                 <div class="stat-label">Tests Passing</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">4h</div>
-                <div class="stat-label">Auto Analysis</div>
+                <div class="stat-value">1m</div>
+                <div class="stat-label">Analysis Cycle</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">AI</div>
-                <div class="stat-label">Gemini Powered</div>
+                <div class="stat-label">Autonomous Tasks</div>
             </div>
         </div>
     </section>
@@ -817,12 +817,27 @@
             <div class="feature-card">
                 <div class="feature-icon">🤖</div>
                 <h3>Autonomous Daemon</h3>
-                <p>Runs continuously, executing comprehensive analysis every 4 hours. Fully configurable scheduling.</p>
+                <p>Runs continuously with configurable 1-minute to multi-hour intervals. Fully autonomous operation.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎯</div>
+                <h3>Task Execution</h3>
+                <p>AI autonomously executes research, data fetching, calculations, and monitoring tasks each cycle.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔍</div>
+                <h3>Entity Insights</h3>
+                <p>Auto-extracts key entities (Fed, ECB, CME, institutions) from reports with relevance scoring.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📋</div>
+                <h3>Action Insights</h3>
+                <p>Identifies actionable tasks from analysis: research topics, data needs, price levels to monitor.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">📊</div>
                 <h3>Multi-Asset Analysis</h3>
-                <p>Track Gold, Silver, Dollar Index (DXY), US 10Y Yield, VIX, and S&P 500 with intermarket correlations.</p>
+                <p>Track Gold, Silver, Dollar Index (DXY), US 10Y Yield, VIX, and S&P 500 with correlations.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">📈</div>
@@ -840,9 +855,9 @@
                 <p>Self-maintaining calendar with Fed, ECB, NFP, CPI events and gold impact analysis.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">🏦</div>
-                <h3>Institutional Tracking</h3>
-                <p>Monitor central bank purchases, ETF flows, and institutional positioning.</p>
+                <div class="feature-icon">📁</div>
+                <h3>Intelligent File Org</h3>
+                <p>Auto-categorizes, dates, and archives reports older than 7 days with searchable index.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">💾</div>
@@ -850,19 +865,14 @@
                 <p>Cortex system tracks predictions, grades performance, and maintains win/loss streaks.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">📱</div>
-                <h3>Dual Interface</h3>
-                <p>Command-line CLI for power users and graphical GUI dashboard for visual monitoring.</p>
+                <div class="feature-icon">🖥️</div>
+                <h3>Modern GUI v3</h3>
+                <p>Dual-pane dashboard: charts grid + AI workspace with tasks, journals, and execution logs.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">⚡</div>
                 <h3>Auto Venv Activation</h3>
                 <p>Scripts automatically detect and activate the virtual environment—just run directly with Python.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon">🔌</div>
-                <h3>No-AI Mode</h3>
-                <p>Run data analysis without API calls for testing, development, or offline use.</p>
             </div>
         </div>
     </section>
@@ -1124,11 +1134,37 @@ a short-term overbought condition...
             </div>
             <div class="arch-diagram">
                 <div class="arch-box">
+                    <h4>InsightsEngine</h4>
+                    <ul>
+                        <li>Entity Extraction</li>
+                        <li>Action Insights</li>
+                        <li>Priority Queue</li>
+                    </ul>
+                </div>
+                <div class="arch-box">
+                    <h4>TaskExecutor</h4>
+                    <ul>
+                        <li>Research Tasks</li>
+                        <li>Data Fetching</li>
+                        <li>Monitoring</li>
+                    </ul>
+                </div>
+                <div class="arch-box">
+                    <h4>FileOrganizer</h4>
+                    <ul>
+                        <li>Categorization</li>
+                        <li>Auto-Dating</li>
+                        <li>Archival</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="arch-diagram">
+                <div class="arch-box">
                     <h4>DBManager</h4>
                     <ul>
                         <li>SQLite Storage</li>
-                        <li>Report Queries</li>
-                        <li>History Access</li>
+                        <li>Insights Tables</li>
+                        <li>Task Logging</li>
                     </ul>
                 </div>
                 <div class="arch-box">
@@ -1170,19 +1206,23 @@ a short-term overbought condition...
                 <tbody>
                     <tr>
                         <td><code>python run.py</code></td>
-                        <td>Autonomous daemon - runs every 4 hours</td>
+                        <td>Autonomous daemon - runs every 1 minute (default)</td>
                     </tr>
                     <tr>
-                        <td><code>python run.py --interval 6</code></td>
-                        <td>Daemon with 6-hour interval</td>
+                        <td><code>python run.py --interval-min 5</code></td>
+                        <td>Daemon with 5-minute interval</td>
+                    </tr>
+                    <tr>
+                        <td><code>python run.py --interval 4</code></td>
+                        <td>Daemon with 4-hour interval (legacy mode)</td>
                     </tr>
                     <tr>
                         <td><code>python run.py --once</code></td>
-                        <td>Single run and exit</td>
+                        <td>Single analysis run and exit</td>
                     </tr>
                     <tr>
                         <td><code>python run.py --run</code></td>
-                        <td>Run all analysis once</td>
+                        <td>Run all analysis once with insights extraction</td>
                     </tr>
                     <tr>
                         <td><code>python run.py --daily</code></td>
@@ -1198,7 +1238,7 @@ a short-term overbought condition...
                     </tr>
                     <tr>
                         <td><code>python gui.py</code></td>
-                        <td>Launch GUI dashboard</td>
+                        <td>Launch modern GUI v3 dashboard</td>
                     </tr>
                 </tbody>
             </table>
