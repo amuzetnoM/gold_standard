@@ -25,7 +25,8 @@ def ensure_dirs(config: Config):
     return reports, charts
 
 
-def write_report(report_path: str, markdown: str):
+def write_report(report_path: str, markdown: str, doc_type: str = 'reports'):
+    """Write report to file. Frontmatter is applied in final pass by run.py."""
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(markdown)
 
