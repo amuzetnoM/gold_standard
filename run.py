@@ -425,6 +425,37 @@ def _run_post_analysis_tasks():
         org_results = organizer.run_maintenance(archive_days=7)
         print(f"[DAEMON] Organized {org_results['organized']} files, archived {org_results['archived']}")
         
+        # 4. Apply frontmatter to all output files (FINAL STEP)
+        print("[DAEMON] Applying frontmatter tags...")
+        try:
+            from scripts.frontmatter import add_frontmatter, has_frontmatter
+            
+            output_path = Path(config.OUTPUT_DIR)
+            reports_path = output_path / "reports"
+            frontmatter_count = 0
+            
+            # Process all markdown files in output directory
+            for md_file in list(output_path.glob("*.md")) + list(reports_path.glob("*.md")) + list(reports_path.glob("**/*.md")):
+                try:
+                    content = md_file.read_text(encoding='utf-8')
+                    
+                    # Skip if already has frontmatter
+                    if has_frontmatter(content):
+                        continue
+                    
+                    # Add frontmatter based on filename
+                    updated = add_frontmatter(content, md_file.name)
+                    md_file.write_text(updated, encoding='utf-8')
+                    frontmatter_count += 1
+                except Exception as fm_err:
+                    logger.debug(f"Frontmatter failed for {md_file.name}: {fm_err}")
+            
+            print(f"[DAEMON] Applied frontmatter to {frontmatter_count} files")
+        except ImportError:
+            print("[DAEMON] Frontmatter module not available, skipping")
+        except Exception as fm_err:
+            print(f"[DAEMON] Frontmatter error: {fm_err}")
+        
     except ImportError as e:
         print(f"[DAEMON] Post-analysis skipped (missing module): {e}")
     except Exception as e:

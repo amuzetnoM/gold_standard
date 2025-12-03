@@ -1318,6 +1318,10 @@ def execute(config: Config, logger: logging.Logger, model: Optional[Any] = None,
     try:
         # Clean non-ASCII / emoji characters from report before saving
         safe_report = strip_emojis(report)
+        
+        # Note: Frontmatter is applied as the FINAL step in run.py after all
+        # file organization is complete. Do not add frontmatter here.
+        
         with open(report_path, 'w', encoding='utf-8') as f:
             f.write(safe_report)
             f.write("\n\n---\n\n## Charts\n\n")

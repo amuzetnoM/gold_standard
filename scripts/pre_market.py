@@ -227,8 +227,13 @@ def generate_premarket(
     md.append("![DXY](../charts/DXY.png)\n")
     
     if not dry_run:
+        content = "\n".join(md)
+        
+        # Note: Frontmatter is applied as FINAL step in run.py
+        # after all file organization is complete
+        
         with open(report_path, 'w', encoding='utf-8') as f:
-            f.write("\n".join(md))
+            f.write(content)
         logger.info(f"Pre-Market Plan written to {report_path}")
     else:
         logger.info(f"[DRY-RUN] Would write to {report_path}")

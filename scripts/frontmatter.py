@@ -126,6 +126,50 @@ def extract_date_from_filename(filename: str) -> Optional[str]:
     return None
 
 
+def extract_journal_metadata(content: str) -> Dict[str, Any]:
+    """
+    Extract journal-specific metadata from content.
+    Looks for bias indicators and price mentions.
+    """
+    metadata = {}
+    
+    # Extract bias from content
+    bias_patterns = [
+        (r'\bbias[:\s]+(\w+)', 1),
+        (r'\b(BULLISH|BEARISH|NEUTRAL)\b', 0),
+        (r'strategic.*?(bullish|bearish|neutral)', 1),
+    ]
+    
+    for pattern, group in bias_patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            bias = match.group(group).upper()
+            if bias in ('BULLISH', 'BEARISH', 'NEUTRAL'):
+                metadata['bias'] = bias
+                break
+    
+    # Extract gold price
+    gold_patterns = [
+        r'gold.*?\$?([\d,]+\.?\d*)',
+        r'\$?([\d,]+\.?\d*)\s*(?:gold|xau)',
+        r'GOLD.*?price.*?\$?([\d,]+\.?\d*)',
+    ]
+    
+    for pattern in gold_patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            try:
+                price_str = match.group(1).replace(',', '')
+                price = float(price_str)
+                if 1000 < price < 10000:  # Reasonable gold price range
+                    metadata['gold_price'] = price
+                    break
+            except (ValueError, IndexError):
+                pass
+    
+    return metadata
+
+
 def generate_frontmatter(
     filename: str,
     content: str,
@@ -179,6 +223,14 @@ def generate_frontmatter(
     if tags:
         tags_str = ', '.join(tags)
         lines.append(f'tags: [{tags_str}]')
+    
+    # Auto-extract journal-specific metadata
+    if doc_type == 'journal':
+        journal_meta = extract_journal_metadata(content)
+        if 'bias' in journal_meta and (not custom_fields or 'bias' not in custom_fields):
+            lines.append(f'bias: {journal_meta["bias"]}')
+        if 'gold_price' in journal_meta and (not custom_fields or 'gold_price' not in custom_fields):
+            lines.append(f'gold_price: {journal_meta["gold_price"]}')
     
     # Add custom fields
     if custom_fields:

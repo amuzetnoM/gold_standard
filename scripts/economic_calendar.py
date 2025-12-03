@@ -737,7 +737,8 @@ class EconomicCalendar:
         output_dir.mkdir(parents=True, exist_ok=True)
         
         report = self.generate_full_calendar_report()
-        filepath = output_dir / f"economic_calendar_{date.today().isoformat()}.md"
+        filename = f"economic_calendar_{date.today().isoformat()}.md"
+        filepath = output_dir / filename
         
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(report)

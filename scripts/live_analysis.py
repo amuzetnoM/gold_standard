@@ -922,11 +922,23 @@ class LiveAnalyzer:
             "economic_calendar": f"economic_calendar_{today}.md",
         }
         
+        # Type mapping for frontmatter
+        type_mapping = {
+            "catalyst_watchlist": "research",
+            "institutional_matrix": "insights",
+            "1y_analysis": "reports",
+            "3m_analysis": "reports",
+            "economic_calendar": "articles",
+        }
+        
         for report_name, content in reports.items():
             filename = file_mapping.get(report_name, f"{report_name}_{today}.md")
             filepath = self.output_dir / filename
             
             try:
+                # Note: Frontmatter is applied as FINAL step in run.py
+                # after all file organization is complete
+                
                 with open(filepath, 'w', encoding='utf-8') as f:
                     f.write(content)
                 saved_reports[report_name] = str(filepath)
