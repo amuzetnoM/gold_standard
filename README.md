@@ -12,7 +12,7 @@
 ```
 
 # Gold Standard 
-*version 3.0.0*
+*version 3.1.0*
 
 
 > **Precious Metals Intelligence Complex** — Quantitative Analysis System
@@ -79,6 +79,9 @@ A comprehensive end-to-end system combining real-time market data, technical ind
 | **Intelligent File Organization** | Auto-categorizes, dates, and archives reports (>7 days) |
 | **YAML Frontmatter** | Auto-generates metadata headers for categorization and tagging |
 | **Notion Integration** | Automatic publishing to Notion database with type/tag mapping |
+| **Rich Notion Formatting** | Enhanced pages with callouts, colors, tables, TOC, and section emojis |
+| **Smart Chart Integration** | Auto-detects tickers and embeds relevant charts in Notion pages |
+| **Usage Management** | Tracks API usage, caches uploads, manages free-tier limits |
 | **Dual Interface** | Command-line CLI and graphical GUI dashboard |
 | **No-AI Mode** | Run data analysis without API calls for testing or offline use |
 
@@ -475,12 +478,25 @@ The system is organized into modular components:
 | **EconomicCalendar** | `scripts/economic_calendar.py` | Self-maintaining economic event calendar |
 | **Frontmatter** | `scripts/frontmatter.py` | YAML metadata generator for reports |
 | **NotionPublisher** | `scripts/notion_publisher.py` | Syncs reports to Notion database |
+| **NotionFormatter** | `scripts/notion_formatter.py` | Rich Notion blocks with callouts, colors, tables |
+| **ChartPublisher** | `scripts/chart_publisher.py` | Uploads charts to imgbb, smart ticker detection |
+| **CleanupManager** | `scripts/cleanup_manager.py` | Usage tracking, retention policies, limit management |
 
 ---
 
 ## Notion Integration
 
-Gold Standard can automatically publish reports to a Notion database after each analysis cycle.
+Gold Standard can automatically publish reports to a Notion database with **rich formatting** and **embedded charts**.
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Rich Formatting** | Callouts, colored text, tables, TOC, section emojis |
+| **Smart Charts** | Auto-detects tickers mentioned and embeds relevant charts |
+| **Usage Management** | Tracks imgbb/Notion usage, caches uploads, warns on limits |
+| **Auto-Categorization** | Types reports by filename pattern |
+| **Tag Extraction** | Extracts tickers and keywords as tags |
 
 ### Setup
 
@@ -493,10 +509,15 @@ Gold Standard can automatically publish reports to a Notion database after each 
    - Click Share → Invite your integration
    - Copy the database ID from the URL: `notion.so/{database_id}?v=...`
 
-3. **Configure Environment**
+3. **Get imgbb API Key (for charts)**
+   - Go to [imgbb API](https://api.imgbb.com/) - free 32MB/month
+   - Sign up and copy your API key
+
+4. **Configure Environment**
    ```env
    NOTION_API_KEY=ntn_xxxxxxxxxxxxx
    NOTION_DATABASE_ID=your-database-id
+   IMGBB_API_KEY=your-imgbb-key
    ```
 
 ### Document Types
@@ -519,7 +540,7 @@ Reports are automatically categorized:
 # Test connection
 python scripts/notion_publisher.py --test
 
-# Publish single file
+# Publish single file (with auto-charts)
 python scripts/notion_publisher.py --file output/reports/journals/Journal_2025-12-03.md
 
 # Sync all outputs
@@ -527,6 +548,35 @@ python scripts/notion_publisher.py --sync-all
 
 # List published pages
 python scripts/notion_publisher.py --list
+```
+
+### Chart Management
+
+```powershell
+# Upload all charts to imgbb
+python scripts/chart_publisher.py --upload-all
+
+# Detect which charts a file needs
+python scripts/chart_publisher.py --detect output/reports/journals/Journal_2025-12-03.md
+
+# List cached chart URLs
+python scripts/chart_publisher.py --list
+```
+
+### Usage & Cleanup
+
+```powershell
+# Check usage status
+python scripts/cleanup_manager.py --status
+
+# Clean old chart cache (default: 30 days)
+python scripts/cleanup_manager.py --cleanup-charts
+
+# Preview cleanup of old reports
+python scripts/cleanup_manager.py --cleanup-all
+
+# Actually archive old content
+python scripts/cleanup_manager.py --cleanup-all --execute
 ```
 
 ---
@@ -540,6 +590,7 @@ python scripts/notion_publisher.py --list
 | `GEMINI_API_KEY` | Yes* | Google Gemini API key (*not needed with `--no-ai`) |
 | `NOTION_API_KEY` | No | Notion integration API key (for auto-publishing) |
 | `NOTION_DATABASE_ID` | No | Notion database ID to publish reports to |
+| `IMGBB_API_KEY` | No | imgbb API key for chart hosting (free: 32MB/month) |
 
 ### Config Class Parameters (main.py)
 
@@ -585,6 +636,12 @@ gold_standard/
 │   ├── split_reports.py      # Weekly/monthly/yearly report generator
 │   ├── frontmatter.py        # YAML frontmatter generator for reports
 │   ├── notion_publisher.py   # Notion database sync and publishing
+│   ├── notion_formatter.py   # Rich Notion formatting (callouts, colors, tables)
+│   ├── chart_publisher.py    # Image hosting and smart chart detection
+│   ├── cleanup_manager.py    # Usage tracking and retention management
+│   ├── file_organizer.py     # Auto-categorizes and archives reports
+│   ├── insights_engine.py    # Entity and action insight extraction
+│   ├── task_executor.py      # Autonomous task execution
 │   ├── init_cortex.py        # Initialize memory from template
 │   ├── get_gold_price.py     # Quick gold price check utility
 │   ├── list_gemini_models.py # List available Gemini models
@@ -673,6 +730,14 @@ The project uses:
 | `scripts/economic_calendar.py` | Self-maintaining economic event calendar |
 | `scripts/pre_market.py` | Pre-market plan generator |
 | `scripts/split_reports.py` | Weekly/monthly/yearly report generator |
+| `scripts/frontmatter.py` | YAML frontmatter generator for reports |
+| `scripts/notion_publisher.py` | Notion database sync and publishing |
+| `scripts/notion_formatter.py` | Rich Notion blocks (callouts, colors, tables, TOC) |
+| `scripts/chart_publisher.py` | imgbb upload, smart ticker detection, caching |
+| `scripts/cleanup_manager.py` | Usage tracking, retention policies, limit warnings |
+| `scripts/file_organizer.py` | Auto-categorizes, dates, and archives reports |
+| `scripts/insights_engine.py` | Entity and action insight extraction |
+| `scripts/task_executor.py` | Autonomous task execution from insights |
 | `scripts/init_cortex.py` | Initialize memory from template |
 | `scripts/get_gold_price.py` | Quick gold price utility |
 | `scripts/list_gemini_models.py` | List available Gemini models |

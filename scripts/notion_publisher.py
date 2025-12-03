@@ -280,7 +280,8 @@ class NotionPublisher:
         doc_type: str = None,
         tags: List[str] = None,
         doc_date: str = None,
-        filename: str = None
+        filename: str = None,
+        use_enhanced_formatting: bool = True
     ) -> Dict[str, str]:
         """Publish a document to Notion."""
         
@@ -302,8 +303,31 @@ class NotionPublisher:
         if not doc_date:
             doc_date = meta.get('date') or date.today().isoformat()
         
-        # Convert to blocks
-        blocks = self.markdown_to_blocks(body)
+        # Get bias from frontmatter
+        bias = meta.get('bias')
+        
+        # Convert to blocks - use enhanced formatter if available
+        if use_enhanced_formatting:
+            try:
+                from scripts.notion_formatter import format_for_notion
+                from scripts.chart_publisher import ChartPublisher
+                
+                # Try to get chart URLs for tickers in content
+                chart_urls = None
+                try:
+                    chart_pub = ChartPublisher()
+                    chart_urls = chart_pub.get_charts_for_content(body)
+                    if chart_urls:
+                        print(f"  📊 Adding charts: {', '.join(chart_urls.keys())}")
+                except Exception as e:
+                    print(f"  ⚠ Chart upload skipped: {e}")
+                
+                blocks = format_for_notion(content, doc_type=doc_type, bias=bias, chart_urls=chart_urls)
+            except ImportError:
+                # Fallback to basic formatting
+                blocks = self.markdown_to_blocks(body)
+        else:
+            blocks = self.markdown_to_blocks(body)
         
         # Build properties - start with required title
         properties = {
@@ -336,6 +360,13 @@ class NotionPublisher:
             properties=properties,
             children=blocks[:100]  # Notion limit per request
         )
+        
+        # Track usage
+        try:
+            from scripts.cleanup_manager import CleanupManager
+            CleanupManager().record_notion_page(len(blocks[:100]))
+        except:
+            pass
         
         page_id = response["id"]
         url = response.get("url", f"https://notion.so/{page_id.replace('-', '')}")
