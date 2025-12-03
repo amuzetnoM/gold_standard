@@ -658,7 +658,8 @@ Provide the complete Python code."""
         return {
             **self.stats,
             'success_rate': (self.stats['successful'] / self.stats['total_executed'] * 100) 
-                           if self.stats['total_executed'] > 0 else 0
+                           if self.stats['total_executed'] > 0 else 0,
+            'handlers': list(self.handlers.keys())
         }
 
 

@@ -712,9 +712,57 @@ class DatabaseManager:
             
             return [dict(row) for row in cursor.fetchall()]
     
+    def save_entity_insights(self, entities: list) -> int:
+        """Save multiple entity insights (batch operation)."""
+        saved = 0
+        for entity in entities:
+            try:
+                # Support both dataclass and dict
+                if hasattr(entity, 'entity_name'):
+                    self.save_entity_insight(
+                        entity_name=entity.entity_name,
+                        entity_type=entity.entity_type,
+                        context=entity.context,
+                        relevance_score=entity.relevance_score,
+                        source_report=entity.source_report,
+                        metadata=str(entity.metadata) if entity.metadata else None
+                    )
+                else:
+                    self.save_entity_insight(**entity)
+                saved += 1
+            except Exception:
+                continue
+        return saved
+
     # ==========================================
     # ACTION INSIGHTS METHODS
     # ==========================================
+    
+    def save_action_insights(self, actions: list) -> int:
+        """Save multiple action insights (batch operation)."""
+        saved = 0
+        for action in actions:
+            try:
+                # Support both dataclass and dict
+                if hasattr(action, 'action_id'):
+                    self.save_action_insight(
+                        action_id=action.action_id,
+                        action_type=action.action_type,
+                        title=action.title,
+                        description=action.description,
+                        priority=action.priority,
+                        status=action.status,
+                        source_report=action.source_report,
+                        source_context=action.source_context,
+                        deadline=action.deadline,
+                        metadata=str(action.metadata) if action.metadata else None
+                    )
+                else:
+                    self.save_action_insight(**action)
+                saved += 1
+            except Exception:
+                continue
+        return saved
     
     def save_action_insight(self, action_id: str, action_type: str,
                            title: str, description: str = None,
