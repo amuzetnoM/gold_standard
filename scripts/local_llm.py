@@ -65,16 +65,53 @@ HAS_LLM_SUPPORT = BACKEND is not None
 # Keep old name for backwards compatibility
 HAS_NATIVE_LLM = HAS_LLM_SUPPORT
 
+# ============================================================================
+# Environment Variable Configuration
+# ============================================================================
+# LOCAL_LLM_MODEL      - Path to GGUF model file
+# LOCAL_LLM_GPU_LAYERS - Number of layers to offload to GPU (0=CPU only, -1=all)
+# LOCAL_LLM_CONTEXT    - Context window size (default: 4096)
+# LOCAL_LLM_THREADS    - Number of CPU threads (0=auto)
+# LOCAL_LLM_AUTO_DOWNLOAD - Auto-download recommended model if none found (1/true)
+
+
+def get_env_int(key: str, default: int) -> int:
+    """Get integer from environment variable."""
+    val = os.environ.get(key, "")
+    try:
+        return int(val) if val else default
+    except ValueError:
+        return default
+
+
+def get_env_bool(key: str, default: bool = False) -> bool:
+    """Get boolean from environment variable."""
+    val = os.environ.get(key, "").lower()
+    if val in ("1", "true", "yes", "on"):
+        return True
+    if val in ("0", "false", "no", "off"):
+        return False
+    return default
+
 
 @dataclass
 class LLMConfig:
-    """Configuration for local LLM."""
+    """Configuration for local LLM.
+
+    All settings can be overridden via environment variables:
+    - LOCAL_LLM_GPU_LAYERS: Number of layers to offload to GPU
+      - 0 = CPU only (default, safe)
+      - -1 = Offload all layers to GPU (fastest if you have VRAM)
+      - N = Offload N layers (balance CPU/GPU)
+    - LOCAL_LLM_CONTEXT: Context window size (default: 4096)
+    - LOCAL_LLM_THREADS: CPU threads (0 = auto-detect)
+    """
 
     model_path: str = ""
-    n_ctx: int = 4096  # Context window
+    n_ctx: int = field(default_factory=lambda: get_env_int("LOCAL_LLM_CONTEXT", 4096))
     n_batch: int = 512  # Batch size
-    n_threads: int = 0  # 0 = auto
-    n_gpu_layers: int = 0  # GPU offload layers
+    n_threads: int = field(default_factory=lambda: get_env_int("LOCAL_LLM_THREADS", 0))
+    n_gpu_layers: int = field(default_factory=lambda: get_env_int("LOCAL_LLM_GPU_LAYERS", 0))
     use_mmap: bool = True
     use_mlock: bool = False
 
@@ -133,6 +170,23 @@ class LocalLLM:
             self.load_model(model_path)
         elif os.environ.get("LOCAL_LLM_MODEL"):
             self.load_model(os.environ.get("LOCAL_LLM_MODEL"))
+        elif get_env_bool("LOCAL_LLM_AUTO_DOWNLOAD"):
+            # Auto-download a model if none found and auto-download is enabled
+            self._try_auto_load()
+
+    def _try_auto_load(self):
+        """Try to find or auto-download a model."""
+        models = self.find_models()
+        if models:
+            # Use the first found model
+            print(f"[LLM] Found model: {models[0]['name']}")
+            self.load_model(models[0]["path"])
+        else:
+            # Auto-download phi3-mini (smallest, still capable)
+            print("[LLM] No models found, auto-downloading phi3-mini...")
+            model_path = download_model("phi3-mini")
+            if model_path:
+                self.load_model(model_path)
 
     @property
     def is_available(self) -> bool:

@@ -20,6 +20,23 @@ mplfinance>=0.12.10b0         # Financial charting library
 google-generativeai>=0.8.0    # Google Gemini AI API client
 
 # -----------------------------------------------------------------------------
+# Local LLM (Optional - for offline/fallback AI)
+# -----------------------------------------------------------------------------
+# llama-cpp-python>=0.3.0     # Local LLM inference (GGUF models)
+#
+# Installation options:
+#   CPU only:    pip install llama-cpp-python
+#   CUDA GPU:    pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+#   Metal GPU:   pip install llama-cpp-python (auto-detected on macOS)
+#
+# Environment variables:
+#   LOCAL_LLM_MODEL=path/to/model.gguf    # Path to GGUF model
+#   LOCAL_LLM_GPU_LAYERS=-1               # GPU offload (-1=all, 0=CPU only)
+#   LOCAL_LLM_AUTO_DOWNLOAD=1             # Auto-download default model
+#   LOCAL_LLM_CONTEXT=4096                # Context window size
+#   PREFER_LOCAL_LLM=1                    # Use local LLM as primary
+
+# -----------------------------------------------------------------------------
 # Utilities & Runtime
 # -----------------------------------------------------------------------------
 schedule>=1.2.0               # Job scheduling for recurring tasks

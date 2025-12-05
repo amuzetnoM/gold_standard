@@ -67,7 +67,7 @@ A comprehensive end-to-end system combining real-time market data, technical ind
 | **Autonomous Daemon** | Runs continuously, executing analysis every minute (configurable) |
 | **Intelligent Scheduling** | Frequency-based task execution: daily/weekly/monthly/yearly cycles |
 | **FallbackLLMProvider** | Resilient AI with Gemini → Local LLM → Graceful degradation chain |
-| **Local LLM Support** | On-device inference via pyvdb (C++) or llama-cpp-python backends |
+| **Local LLM Support** | On-device inference with llama-cpp-python (CPU/GPU), any GGUF model |
 | **Notion Deduplication** | Content hashing prevents duplicate uploads; tracks sync state |
 | **Document Lifecycle** | Draft/in_progress/published status controls Notion visibility |
 | **Auto Venv Activation** | Scripts automatically detect and activate virtual environment |
@@ -685,10 +685,32 @@ When running `--sync-all`, the publisher automatically skips non-published docum
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GEMINI_API_KEY` | Yes* | Google Gemini API key (*not needed with `--no-ai`) |
+| `GEMINI_API_KEY` | Yes* | Google Gemini API key (*not needed with `--no-ai` or local LLM) |
 | `NOTION_API_KEY` | No | Notion integration API key (for auto-publishing) |
 | `NOTION_DATABASE_ID` | No | Notion database ID to publish reports to |
 | `IMGBB_API_KEY` | No | imgbb API key for chart hosting (free: 32MB/month) |
+
+#### Local LLM Environment Variables (v3.3.0+)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCAL_LLM_MODEL` | (auto-detect) | Path to GGUF model file |
+| `LOCAL_LLM_GPU_LAYERS` | `0` | GPU offload layers (`-1`=all, `0`=CPU only) |
+| `LOCAL_LLM_CONTEXT` | `4096` | Context window size |
+| `LOCAL_LLM_AUTO_DOWNLOAD` | `0` | Auto-download default model if none found |
+| `PREFER_LOCAL_LLM` | `0` | Use local LLM as primary instead of Gemini |
+
+**Local LLM Installation:**
+```bash
+# CPU only (default)
+pip install llama-cpp-python
+
+# NVIDIA GPU (CUDA 12.4)
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+
+# macOS Metal GPU (auto-detected)
+pip install llama-cpp-python
+```
 
 ### Config Class Parameters (main.py)
 
