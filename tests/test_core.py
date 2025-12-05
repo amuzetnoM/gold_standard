@@ -1,16 +1,15 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  _________._____________.___ ____ ___  _________      .__         .__            
-# /   _____/|   \______   \   |    |   \/   _____/____  |  | ______ |  |__ _____   
-# \_____  \ |   ||       _/   |    |   /\_____  \__  \ |  | \____ \|  |  \__  \  
+#  _________._____________.___ ____ ___  _________      .__         .__
+# /   _____/|   \______   \   |    |   \/   _____/____  |  | ______ |  |__ _____
+# \_____  \ |   ||       _/   |    |   /\_____  \__  \ |  | \____ \|  |  \__  \
 # /        \|   ||    |   \   |    |  / /        \/ __ \|  |_|  |_> >   Y  \/ __ \_
 # /_______  /|___||____|_  /___|______/ /_______  (____  /____/   __/|___|  (____  /
-#         \/             \/                     \/     \/     |__|        \/     \/ 
+#         \/             \/                     \/     \/     |__|        \/     \/
 #
 # Gold Standard - Precious Metals Intelligence System
 # Copyright (c) 2025 SIRIUS Alpha
 # All rights reserved.
 # ══════════════════════════════════════════════════════════════════════════════
-import logging
 import sys
 from pathlib import Path
 
@@ -25,15 +24,15 @@ fake_pandas_ta = types.SimpleNamespace(
     atr=lambda high, low, close, length=14: [],
     adx=lambda high, low, close, length=14: None,
 )
-sys.modules['pandas_ta'] = fake_pandas_ta
+sys.modules["pandas_ta"] = fake_pandas_ta
 
-from main import Strategist, Config, setup_logging
+from main import Config, Strategist, setup_logging
 
 
 def test_extract_bias_explicit():
     cfg = Config()
     logger = setup_logging(cfg)
-    data = {'GOLD': {'price': 2000, 'atr': 5}, 'VIX': {'price': 12}}
+    data = {"GOLD": {"price": 2000, "atr": 5}, "VIX": {"price": 12}}
     s = Strategist(cfg, logger, data, [], "No history", model=None)
 
     txt = "**BIAS**: **BULLISH**\nSome other content"
@@ -46,7 +45,7 @@ def test_extract_bias_explicit():
 def test_extract_bias_fallback_counts():
     cfg = Config()
     logger = setup_logging(cfg)
-    data = {'GOLD': {'price': 2000, 'atr': 5}}
+    data = {"GOLD": {"price": 2000, "atr": 5}}
     s = Strategist(cfg, logger, data, [], "No history", model=None)
 
     txt = "BULLISH repeated BULLISH BULLISH BEARISH"

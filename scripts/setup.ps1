@@ -49,7 +49,7 @@ function Get-PythonCommand {
             return "py -3.12"
         }
     } catch {}
-    
+
     # Try py launcher with 3.11
     try {
         $ver = py -3.11 --version 2>&1
@@ -57,7 +57,7 @@ function Get-PythonCommand {
             return "py -3.11"
         }
     } catch {}
-    
+
     # Try py launcher with 3.10
     try {
         $ver = py -3.10 --version 2>&1
@@ -65,7 +65,7 @@ function Get-PythonCommand {
             return "py -3.10"
         }
     } catch {}
-    
+
     # Try py launcher with 3.13
     try {
         $ver = py -3.13 --version 2>&1
@@ -73,7 +73,7 @@ function Get-PythonCommand {
             return "py -3.13"
         }
     } catch {}
-    
+
     # Try default python
     try {
         $ver = python --version 2>&1
@@ -81,7 +81,7 @@ function Get-PythonCommand {
             return "python"
         }
     } catch {}
-    
+
     return $null
 }
 
@@ -92,7 +92,7 @@ $pythonCmd = Get-PythonCommand
 
 if ($null -eq $pythonCmd) {
     Write-Host "      No compatible Python (3.10-3.13) found." -ForegroundColor Yellow
-    
+
     # Try to auto-install Python 3.12
     if (Test-Winget) {
         Write-Host "      Attempting automatic installation..." -ForegroundColor Cyan

@@ -60,20 +60,20 @@ find_python() {
             return 0
         fi
     done
-    
+
     # Try generic python3
     if result=$(check_python_version python3); then
         echo $result
         return 0
     fi
-    
+
     return 1
 }
 
 # Function to install Python based on OS
 install_python() {
     echo -e "      ${CYAN}Attempting automatic Python 3.12 installation...${NC}"
-    
+
     case $OS_TYPE in
         macos)
             if command -v brew &> /dev/null; then
@@ -126,7 +126,7 @@ PYTHON_CMD=$(find_python) || PYTHON_CMD=""
 
 if [[ -z "$PYTHON_CMD" ]]; then
     echo -e "      ${YELLOW}No compatible Python (3.10-3.13) found.${NC}"
-    
+
     if install_python; then
         sleep 2
         PYTHON_CMD=$(find_python) || PYTHON_CMD=""

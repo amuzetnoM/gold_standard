@@ -1,6 +1,6 @@
 # GOLD STANDARD v3.1.0
 
-**Release Date:** December 3, 2025  
+**Release Date:** December 3, 2025
 **First Public Release**
 
 ---

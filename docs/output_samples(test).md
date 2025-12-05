@@ -22,10 +22,10 @@
 2025-12-03 13:41:13 | INFO     | GOLD STANDARD SYSTEM ONLINE
 2025-12-03 13:41:13 | INFO     | Run interval: 0 hours
 2025-12-03 13:41:13 | INFO     | Press Ctrl+C to shutdown gracefully
-2025-12-03 13:41:13 | INFO     | ==================================================    
+2025-12-03 13:41:13 | INFO     | ==================================================
 2025-12-03 13:41:13 | INFO     | QUANT CYCLE INITIATED
-2025-12-03 13:41:13 | INFO     | ==================================================    
-2025-12-03 13:41:13 | INFO     | Engaging Quant Engine - fetching market data...       
+2025-12-03 13:41:13 | INFO     | ==================================================
+2025-12-03 13:41:13 | INFO     | Engaging Quant Engine - fetching market data...
 2025-12-03 13:41:13 | INFO     | [SYSTEM] Engaging Quant Engine...
 2025-12-03 13:41:17 | INFO     | Chart generated and verified: C:\workspace\gold_standard\output\charts\GOLD.png
 2025-12-03 13:41:19 | INFO     | Chart generated and verified: C:\workspace\gold_standard\output\charts\SILVER.png
@@ -99,7 +99,7 @@
 2025-12-03 13:42:17 | INFO     | Chart generated and verified: C:\workspace\gold_standard\output\charts\YIELD.png
 2025-12-03 13:42:18 | INFO     | Chart generated and verified: C:\workspace\gold_standard\output\charts\VIX.png
 2025-12-03 13:42:19 | INFO     | Chart generated and verified: C:\workspace\gold_standard\output\charts\SPX.png
-2025-12-03 13:42:19 | INFO     | Engaging Quant Engine - fetching market data...       
+2025-12-03 13:42:19 | INFO     | Engaging Quant Engine - fetching market data...
 2025-12-03 13:42:19 | INFO     | [SYSTEM] Engaging Quant Engine...
 2025-12-03 13:42:21 | INFO     | Chart generated and verified: C:\workspace\gold_standard\output\charts\GOLD.png
 2025-12-03 13:42:23 | INFO     | Chart generated and verified: C:\workspace\gold_standard\output\charts\SILVER.png
@@ -164,7 +164,7 @@ Found 4 action insights:
          Deadline: 2025-12-03T15:46:24.699768
   [HIGH] data_fetch: Auto-extracted from test_report: ETF flows
          Deadline: 2025-12-03T14:16:24.699768
-  [CRITICAL] monitoring: Auto-extracted from test_report: - Support: 2580 (50-day SMA  
+  [CRITICAL] monitoring: Auto-extracted from test_report: - Support: 2580 (50-day SMA
          Deadline: 2025-12-03T13:51:24.699768
 
 ============================================================
@@ -195,7 +195,7 @@ C:\workspace\gold_standard\scripts\task_executor.py:432: FutureWarning: YF.downl
 C:\workspace\gold_standard\scripts\task_executor.py:445: FutureWarning: Calling float on a single element Series is deprecated and will raise a TypeError in the future. Use float(ser.iloc[0]) instead
   current_price = float(close.iloc[-1])
 Success: True
-Result: {'position_sizing': {'current_price': 4236.39990234375, 'atr_14': nan, 'recommended_stop': nan, 'calculations': [{'account_size': 10000, 'risk_percent': 1.0, 'risk_amount': 100.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 10000, 'risk_percent': 2.0, 'risk_amount': 200.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 10000, 'risk_percent': 3.0, 'risk_amount': 300.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 50000, 'risk_percent': 1.0, 'risk_amount': 500.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 50000, 'risk_percent': 2.0, 'risk_amount': 1000.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 50000, 'risk_percent': 3.0, 'risk_amount': 1500.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 100000, 'risk_percent': 1.0, 'risk_amount': 1000.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 100000, 'risk_percent': 2.0, 'risk_amount': 2000.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 100000, 'risk_percent': 3.0, 'risk_amount': 3000.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}]}}  
+Result: {'position_sizing': {'current_price': 4236.39990234375, 'atr_14': nan, 'recommended_stop': nan, 'calculations': [{'account_size': 10000, 'risk_percent': 1.0, 'risk_amount': 100.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 10000, 'risk_percent': 2.0, 'risk_amount': 200.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 10000, 'risk_percent': 3.0, 'risk_amount': 300.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 50000, 'risk_percent': 1.0, 'risk_amount': 500.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 50000, 'risk_percent': 2.0, 'risk_amount': 1000.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 50000, 'risk_percent': 3.0, 'risk_amount': 1500.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 100000, 'risk_percent': 1.0, 'risk_amount': 1000.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 100000, 'risk_percent': 2.0, 'risk_amount': 2000.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}, {'account_size': 100000, 'risk_percent': 3.0, 'risk_amount': 3000.0, 'position_size_oz': np.float64(nan), 'position_value': np.float64(nan)}]}}
 
 ============================================================
 TASK EXECUTOR TEST COMPLETE
@@ -329,4 +329,3 @@ PS C:\workspace\gold_standard>
 
 
 ---------------------------------------------------------------------------------------
-
