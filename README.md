@@ -66,8 +66,10 @@ A comprehensive end-to-end system combining real-time market data, technical ind
 |---------|-------------|
 | **Autonomous Daemon** | Runs continuously, executing analysis every minute (configurable) |
 | **Intelligent Scheduling** | Frequency-based task execution: daily/weekly/monthly/yearly cycles |
-| **FallbackLLMProvider** | Resilient AI with Gemini → Local LLM → Graceful degradation chain |
-| **Local LLM Support** | On-device inference with llama-cpp-python (CPU/GPU), any GGUF model |
+| **Multi-Provider LLM** | Gemini → Ollama → llama.cpp fallback chain with auto-switching |
+| **Local-First Mode** | Run fully offline with `PREFER_LOCAL_LLM=1` - no cloud required |
+| **Ollama Support** | Easy local AI via Ollama server with one-command model management |
+| **llama.cpp Support** | Direct GGUF model loading with CPU/GPU acceleration |
 | **Notion Deduplication** | Content hashing prevents duplicate uploads; tracks sync state |
 | **Document Lifecycle** | Draft/in_progress/published status controls Notion visibility |
 | **Auto Venv Activation** | Scripts automatically detect and activate virtual environment |
@@ -685,12 +687,33 @@ When running `--sync-all`, the publisher automatically skips non-published docum
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GEMINI_API_KEY` | Yes* | Google Gemini API key (*not needed with `--no-ai` or local LLM) |
+| `GEMINI_API_KEY` | No* | Google Gemini API key (*not needed with local LLM) |
 | `NOTION_API_KEY` | No | Notion integration API key (for auto-publishing) |
 | `NOTION_DATABASE_ID` | No | Notion database ID to publish reports to |
 | `IMGBB_API_KEY` | No | imgbb API key for chart hosting (free: 32MB/month) |
 
-#### Local LLM Environment Variables (v3.3.0+)
+#### LLM Provider Selection (v3.3.0+)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_PROVIDER` | `auto` | Force provider: `gemini`, `ollama`, `local` |
+| `PREFER_LOCAL_LLM` | `0` | Use local providers first (no cloud) |
+
+#### Ollama Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `llama3.2` | Ollama model name |
+
+```bash
+# Quick Ollama setup
+ollama pull llama3.2
+export LLM_PROVIDER=ollama
+python run.py
+```
+
+#### llama.cpp Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -698,19 +721,17 @@ When running `--sync-all`, the publisher automatically skips non-published docum
 | `LOCAL_LLM_GPU_LAYERS` | `0` | GPU offload layers (`-1`=all, `0`=CPU only) |
 | `LOCAL_LLM_CONTEXT` | `4096` | Context window size |
 | `LOCAL_LLM_AUTO_DOWNLOAD` | `0` | Auto-download default model if none found |
-| `PREFER_LOCAL_LLM` | `0` | Use local LLM as primary instead of Gemini |
 
-**Local LLM Installation:**
+**llama-cpp-python Installation:**
 ```bash
 # CPU only (default)
 pip install llama-cpp-python
 
 # NVIDIA GPU (CUDA 12.4)
 pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
-
-# macOS Metal GPU (auto-detected)
-pip install llama-cpp-python
 ```
+
+> 📖 **See [docs/LLM_PROVIDERS.md](docs/LLM_PROVIDERS.md) for complete LLM configuration guide.**
 
 ### Config Class Parameters (main.py)
 

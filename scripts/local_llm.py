@@ -53,7 +53,19 @@ except ImportError:
     Llama = None
     HAS_LLAMA_CPP_PYTHON = False
 
-# Determine best available backend
+# Backend 3: Ollama (requires ollama server running)
+try:
+    import requests
+
+    # Check if Ollama is running
+    _ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    _resp = requests.get(f"{_ollama_url}/api/tags", timeout=2)
+    HAS_OLLAMA = _resp.status_code == 200
+except Exception:
+    HAS_OLLAMA = False
+
+# Determine best available backend for local models
+# (Ollama is separate - it's a server-based provider)
 if HAS_PYVDB:
     BACKEND = "pyvdb"
 elif HAS_LLAMA_CPP_PYTHON:
@@ -61,18 +73,27 @@ elif HAS_LLAMA_CPP_PYTHON:
 else:
     BACKEND = None
 
-HAS_LLM_SUPPORT = BACKEND is not None
+HAS_LLM_SUPPORT = BACKEND is not None or HAS_OLLAMA
 # Keep old name for backwards compatibility
 HAS_NATIVE_LLM = HAS_LLM_SUPPORT
 
 # ============================================================================
 # Environment Variable Configuration
 # ============================================================================
+# LLM Provider Selection:
+# LLM_PROVIDER         - Force provider: gemini, ollama, local (default: auto)
+# PREFER_LOCAL_LLM     - Use local LLM first, skip Gemini (1/true)
+#
+# Local LLM (llama.cpp):
 # LOCAL_LLM_MODEL      - Path to GGUF model file
 # LOCAL_LLM_GPU_LAYERS - Number of layers to offload to GPU (0=CPU only, -1=all)
 # LOCAL_LLM_CONTEXT    - Context window size (default: 4096)
 # LOCAL_LLM_THREADS    - Number of CPU threads (0=auto)
 # LOCAL_LLM_AUTO_DOWNLOAD - Auto-download recommended model if none found (1/true)
+#
+# Ollama:
+# OLLAMA_HOST          - Ollama server URL (default: http://localhost:11434)
+# OLLAMA_MODEL         - Ollama model name (default: llama3.2)
 
 
 def get_env_int(key: str, default: int) -> int:
@@ -515,6 +536,209 @@ class GenerateContentResponse:
     def __init__(self, text: str):
         self.text = text
         self.candidates = [{"content": {"parts": [{"text": text}]}}]
+
+
+# ============================================================================
+# Ollama Provider
+# ============================================================================
+
+
+class OllamaLLM:
+    """
+    Ollama LLM provider - connects to local Ollama server.
+
+    Ollama provides easy model management and GPU acceleration.
+    Install: https://ollama.ai
+
+    Usage:
+        # Start Ollama server first: ollama serve
+        # Pull a model: ollama pull llama3.2
+
+        llm = OllamaLLM()
+        response = llm.generate("What is the gold price outlook?")
+        # or chat:
+        response = llm.chat([{"role": "user", "content": "Hello!"}])
+
+    Environment Variables:
+        OLLAMA_HOST  - Server URL (default: http://localhost:11434)
+        OLLAMA_MODEL - Model name (default: llama3.2)
+    """
+
+    def __init__(self, model: str = None, host: str = None):
+        """
+        Initialize Ollama client.
+
+        Args:
+            model: Model name (e.g., "llama3.2", "mistral", "phi3")
+            host: Ollama server URL
+        """
+        self._host = host or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+        self._model = model or os.environ.get("OLLAMA_MODEL", "llama3.2")
+        self._available = False
+        self._loaded_model = None
+
+        # Check connection
+        try:
+            import requests
+
+            resp = requests.get(f"{self._host}/api/tags", timeout=5)
+            if resp.status_code == 200:
+                self._available = True
+                models = resp.json().get("models", [])
+                self._installed_models = [m["name"] for m in models]
+                # Check if requested model is available
+                if any(self._model in m for m in self._installed_models):
+                    self._loaded_model = self._model
+        except Exception as e:
+            print(f"[Ollama] Connection failed: {e}")
+
+    @property
+    def is_available(self) -> bool:
+        """Check if Ollama server is accessible."""
+        return self._available
+
+    @property
+    def is_loaded(self) -> bool:
+        """Check if model is available."""
+        return self._loaded_model is not None
+
+    @property
+    def model_name(self) -> str:
+        """Get loaded model name."""
+        return self._loaded_model or self._model
+
+    def list_models(self) -> List[str]:
+        """List installed Ollama models."""
+        return getattr(self, "_installed_models", [])
+
+    def pull_model(self, model: str) -> bool:
+        """Pull a model from Ollama library."""
+        try:
+            import requests
+
+            print(f"[Ollama] Pulling {model}...")
+            resp = requests.post(f"{self._host}/api/pull", json={"name": model}, stream=True, timeout=600)
+            for line in resp.iter_lines():
+                if line:
+                    import json
+
+                    data = json.loads(line)
+                    if "status" in data:
+                        print(f"\r[Ollama] {data['status']}", end="", flush=True)
+            print()
+            self._loaded_model = model
+            return True
+        except Exception as e:
+            print(f"[Ollama] Pull failed: {e}")
+            return False
+
+    def generate(
+        self,
+        prompt: str,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        **kwargs,
+    ) -> str:
+        """
+        Generate text completion.
+
+        Args:
+            prompt: Input prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+
+        Returns:
+            Generated text
+        """
+        if not self._available:
+            raise RuntimeError("Ollama server not available")
+
+        try:
+            import requests
+
+            resp = requests.post(
+                f"{self._host}/api/generate",
+                json={
+                    "model": self._model,
+                    "prompt": prompt,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": temperature,
+                    },
+                    "stream": False,
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            return resp.json()["response"]
+        except Exception as e:
+            raise RuntimeError(f"Ollama generate failed: {e}")
+
+    def chat(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Chat completion with message history.
+
+        Args:
+            messages: List of {"role": "user/assistant/system", "content": "..."}
+            max_tokens: Maximum tokens
+            temperature: Sampling temperature
+
+        Returns:
+            Dict with 'content' and token info
+        """
+        if not self._available:
+            raise RuntimeError("Ollama server not available")
+
+        try:
+            import time
+
+            import requests
+
+            start = time.time()
+            resp = requests.post(
+                f"{self._host}/api/chat",
+                json={
+                    "model": self._model,
+                    "messages": messages,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": temperature,
+                    },
+                    "stream": False,
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            elapsed = (time.time() - start) * 1000
+
+            return {
+                "content": data["message"]["content"],
+                "tokens_generated": data.get("eval_count", 0),
+                "tokens_prompt": data.get("prompt_eval_count", 0),
+                "generation_time_ms": elapsed,
+            }
+        except Exception as e:
+            raise RuntimeError(f"Ollama chat failed: {e}")
+
+    def generate_content(self, prompt: str, **kwargs) -> "GenerateContentResponse":
+        """
+        Gemini-compatible API.
+
+        Args:
+            prompt: Input prompt
+
+        Returns:
+            GenerateContentResponse with .text attribute
+        """
+        text = self.generate(prompt, **kwargs)
+        return GenerateContentResponse(text)
 
 
 # ============================================================================

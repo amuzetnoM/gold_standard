@@ -120,6 +120,42 @@ class GeminiProvider(LLMProvider):
         return self.model.generate_content(prompt)
 
 
+class OllamaProvider(LLMProvider):
+    """Ollama API provider - connects to local Ollama server.
+
+    Ollama provides easy local model management with GPU acceleration.
+    Install from: https://ollama.ai
+
+    Configure via environment variables:
+    - OLLAMA_HOST: Server URL (default: http://localhost:11434)
+    - OLLAMA_MODEL: Model name (default: llama3.2)
+    """
+
+    def __init__(self, model: str = None):
+        self.name = "Ollama"
+        self._llm = None
+        self._available = False
+
+        try:
+            from scripts.local_llm import OllamaLLM
+
+            self._llm = OllamaLLM(model=model)
+            self._available = self._llm.is_available
+            if self._available:
+                self.name = f"Ollama ({self._llm.model_name})"
+        except ImportError as e:
+            print(f"[Ollama] Not available: {e}")
+
+    @property
+    def is_available(self) -> bool:
+        return self._available
+
+    def generate_content(self, prompt: str) -> Any:
+        if not self._available:
+            raise RuntimeError("Ollama not available")
+        return self._llm.generate_content(prompt)
+
+
 class LocalLLMProvider(LLMProvider):
     """Local LLM provider using llama-cpp-python.
 
@@ -181,11 +217,15 @@ class FallbackLLMProvider(LLMProvider):
     """
     Robust LLM provider with automatic fallback chain.
 
-    Fallback Order:
+    Default Fallback Order (configurable via LLM_PROVIDER env var):
     1. Gemini API (cloud, high quality)
-    2. Local LLM (on-device, no quota limits)
+    2. Ollama (local server, easy model management)
+    3. Local LLM / llama.cpp (on-device, no dependencies)
 
-    Switches to local after just 1 Gemini failure for fast recovery.
+    Set PREFER_LOCAL_LLM=1 to reverse order (local first, no cloud).
+    Set LLM_PROVIDER=ollama|local|gemini to force a specific provider.
+
+    Switches to next provider after just 1 failure for fast recovery.
     """
 
     def __init__(self, config: "Config", logger: logging.Logger):
@@ -193,50 +233,164 @@ class FallbackLLMProvider(LLMProvider):
         self.config = config
         self.logger = logger
         self._gemini = None
+        self._ollama = None
         self._local = None
         self._current = None
-        self._gemini_failures = 0
-        self._max_gemini_failures = 1  # Switch to local after 1 failure
-        self._switched_to_local = False
+        self._providers = []  # Ordered list of available providers
+        self._primary_failures = 0
+        self._max_failures = 1  # Switch to next after 1 failure
+        self._switched = False
 
-        # Initialize Gemini (primary)
+        # Determine provider priority
+        prefer_local = config.PREFER_LOCAL_LLM
+        forced_provider = os.environ.get("LLM_PROVIDER", "").lower()
+
+        # Build provider chain based on configuration
+        if forced_provider == "local":
+            self._init_local_only(config, logger)
+        elif forced_provider == "ollama":
+            self._init_ollama_only(config, logger)
+        elif forced_provider == "gemini":
+            self._init_gemini_only(config, logger)
+        elif prefer_local:
+            self._init_local_first(config, logger)
+        else:
+            self._init_gemini_first(config, logger)
+
+        if not self._current:
+            logger.warning("[LLM] ⚠ No LLM providers available! AI features disabled.")
+
+    def _init_gemini_first(self, config, logger):
+        """Default: Gemini → Ollama → Local"""
+        # 1. Gemini (primary)
         if config.GEMINI_API_KEY:
             try:
                 genai.configure(api_key=config.GEMINI_API_KEY)
                 self._gemini = GeminiProvider(config.GEMINI_MODEL)
+                self._providers.append(self._gemini)
                 self._current = self._gemini
-                self.name = "Gemini+Fallback"
+                self.name = "Gemini"
                 logger.info(f"[LLM] ✓ Primary: Gemini ({config.GEMINI_MODEL})")
             except Exception as e:
                 logger.warning(f"[LLM] ✗ Gemini init failed: {e}")
 
-        # Initialize local LLM (fallback)
+        # 2. Ollama (fallback 1)
+        self._try_init_ollama(config, logger)
+
+        # 3. Local LLM (fallback 2)
+        self._try_init_local(config, logger)
+
+        self._update_name()
+
+    def _init_local_first(self, config, logger):
+        """PREFER_LOCAL_LLM=1: Local → Ollama → Gemini"""
+        logger.info("[LLM] Local-first mode enabled (PREFER_LOCAL_LLM=1)")
+
+        # 1. Local LLM (primary)
+        self._try_init_local(config, logger, as_primary=True)
+
+        # 2. Ollama (fallback 1)
+        self._try_init_ollama(config, logger)
+
+        # 3. Gemini (fallback 2 - only if local fails)
+        if config.GEMINI_API_KEY and not self._current:
+            try:
+                genai.configure(api_key=config.GEMINI_API_KEY)
+                self._gemini = GeminiProvider(config.GEMINI_MODEL)
+                self._providers.append(self._gemini)
+                if not self._current:
+                    self._current = self._gemini
+                logger.info(f"[LLM] ✓ Fallback: Gemini ({config.GEMINI_MODEL})")
+            except Exception as e:
+                logger.debug(f"[LLM] Gemini fallback not available: {e}")
+
+        self._update_name()
+
+    def _init_local_only(self, config, logger):
+        """LLM_PROVIDER=local: Only local LLM, no cloud"""
+        logger.info("[LLM] Local-only mode (LLM_PROVIDER=local)")
+        self._try_init_local(config, logger, as_primary=True)
+        if not self._current:
+            logger.warning("[LLM] ✗ No local model found. Set LOCAL_LLM_MODEL or install llama-cpp-python")
+        self._update_name()
+
+    def _init_ollama_only(self, config, logger):
+        """LLM_PROVIDER=ollama: Only Ollama, no fallback"""
+        logger.info("[LLM] Ollama-only mode (LLM_PROVIDER=ollama)")
+        self._try_init_ollama(config, logger, as_primary=True)
+        if not self._current:
+            logger.warning("[LLM] ✗ Ollama not available. Run: ollama serve")
+        self._update_name()
+
+    def _init_gemini_only(self, config, logger):
+        """LLM_PROVIDER=gemini: Only Gemini, no fallback"""
+        logger.info("[LLM] Gemini-only mode (LLM_PROVIDER=gemini)")
+        if config.GEMINI_API_KEY:
+            try:
+                genai.configure(api_key=config.GEMINI_API_KEY)
+                self._gemini = GeminiProvider(config.GEMINI_MODEL)
+                self._providers.append(self._gemini)
+                self._current = self._gemini
+                logger.info(f"[LLM] ✓ Gemini ({config.GEMINI_MODEL})")
+            except Exception as e:
+                logger.error(f"[LLM] ✗ Gemini init failed: {e}")
+        else:
+            logger.error("[LLM] ✗ GEMINI_API_KEY not set")
+        self._update_name()
+
+    def _try_init_ollama(self, config, logger, as_primary=False):
+        """Try to initialize Ollama provider."""
+        try:
+            ollama_model = os.environ.get("OLLAMA_MODEL", "")
+            self._ollama = OllamaProvider(model=ollama_model if ollama_model else None)
+            if self._ollama.is_available:
+                self._providers.append(self._ollama)
+                if as_primary or not self._current:
+                    self._current = self._ollama
+                    logger.info(f"[LLM] ✓ {'Primary' if as_primary else 'Using'}: {self._ollama.name}")
+                else:
+                    logger.info(f"[LLM] ✓ Fallback ready: {self._ollama.name}")
+            else:
+                self._ollama = None
+        except Exception as e:
+            logger.debug(f"[LLM] Ollama not available: {e}")
+            self._ollama = None
+
+    def _try_init_local(self, config, logger, as_primary=False):
+        """Try to initialize local LLM provider."""
         try:
             self._local = LocalLLMProvider(
                 model_path=config.LOCAL_LLM_MODEL if config.LOCAL_LLM_MODEL else None, auto_find=True
             )
             if self._local.is_available:
-                # Get GPU config for logging
+                self._providers.append(self._local)
                 gpu_layers = config.LOCAL_LLM_GPU_LAYERS
                 gpu_mode = f"GPU ({gpu_layers} layers)" if gpu_layers else "CPU"
                 model_name = config.LOCAL_LLM_MODEL.split("/")[-1] if config.LOCAL_LLM_MODEL else "auto-detected"
 
-                if not self._current:
+                if as_primary or not self._current:
                     self._current = self._local
-                    self.name = "Local"
-                    logger.info(f"[LLM] ✓ Using Local LLM: {model_name} [{gpu_mode}]")
+                    logger.info(
+                        f"[LLM] ✓ {'Primary' if as_primary else 'Using'}: Local LLM ({model_name}) [{gpu_mode}]"
+                    )
                 else:
                     logger.info(f"[LLM] ✓ Fallback ready: Local LLM ({model_name}) [{gpu_mode}]")
             else:
                 self._local = None
-                if not self._current:
+                if as_primary:
                     logger.warning("[LLM] ✗ No local model found. Set LOCAL_LLM_MODEL or LOCAL_LLM_AUTO_DOWNLOAD=1")
         except Exception as e:
             logger.debug(f"[LLM] Local LLM not available: {e}")
             self._local = None
 
-        if not self._current:
-            logger.warning("[LLM] ⚠ No LLM providers available! AI features disabled.")
+    def _update_name(self):
+        """Update provider name based on chain."""
+        if self._current:
+            names = [p.name.split()[0] for p in self._providers]
+            if len(names) > 1:
+                self.name = f"{names[0]}+{'→'.join(names[1:])}"
+            else:
+                self.name = names[0] if names else "Unknown"
 
     @property
     def is_available(self) -> bool:
@@ -256,23 +410,26 @@ class FallbackLLMProvider(LLMProvider):
         ]
         return any(p in error_str for p in quota_patterns)
 
-    def _switch_to_local(self, reason: str):
-        """Switch to local LLM provider with detailed logging."""
-        if self._local and self._local.is_available:
-            self._current = self._local
-            self.name = "Local (fallback)"
-            self._switched_to_local = True
-            self.logger.warning(f"[LLM] ⚡ Switching to local LLM: {reason[:80]}")
-            self.logger.info("[LLM] ✓ Local LLM activated - continuing without interruption")
-            return True
-        self.logger.error("[LLM] ✗ Cannot switch to local - no fallback available")
+    def _switch_to_next(self, reason: str) -> bool:
+        """Switch to next available provider in the chain."""
+        current_idx = self._providers.index(self._current) if self._current in self._providers else -1
+        for i in range(current_idx + 1, len(self._providers)):
+            next_provider = self._providers[i]
+            if next_provider.is_available:
+                self._current = next_provider
+                self.name = f"{next_provider.name} (fallback)"
+                self._switched = True
+                self.logger.warning(f"[LLM] ⚡ Switching to {next_provider.name}: {reason[:60]}")
+                self.logger.info(f"[LLM] ✓ {next_provider.name} activated - continuing without interruption")
+                return True
+        self.logger.error("[LLM] ✗ No more fallback providers available")
         return False
 
     def generate_content(self, prompt: str) -> Any:
         """
-        Generate content with immediate fallback on quota/errors.
+        Generate content with automatic fallback through provider chain.
 
-        Switches to local LLM after just 1 Gemini failure for:
+        Switches to next provider after 1 failure for:
         - Quota exhaustion (429 errors)
         - Rate limiting
         - API unavailability
@@ -283,66 +440,41 @@ class FallbackLLMProvider(LLMProvider):
         if not self._current:
             raise RuntimeError("No LLM provider available")
 
-        # If we've already switched to local, use it directly
-        if self._current == self._local:
-            return self._local.generate_content(prompt)
+        # Track attempts through provider chain
+        attempted = set()
 
-        # Try Gemini first (if not exhausted)
-        if self._gemini and self._gemini_failures < self._max_gemini_failures:
+        while self._current and self._current not in attempted:
+            attempted.add(self._current)
             try:
-                result = self._gemini.generate_content(prompt)
+                result = self._current.generate_content(prompt)
                 return result
             except Exception as e:
-                self._gemini_failures += 1
+                self._primary_failures += 1
                 error_type = "quota" if self._is_quota_error(e) else "error"
-                self.logger.warning(
-                    f"[LLM] Gemini {error_type} ({self._gemini_failures}/{self._max_gemini_failures}): {str(e)[:60]}"
-                )
+                self.logger.warning(f"[LLM] {self._current.name} {error_type}: {str(e)[:60]}")
 
-                # Immediately switch to local on ANY error (quota, rate limit, etc.)
-                if self._switch_to_local(f"Gemini {error_type}: {str(e)[:50]}"):
-                    # Seamlessly continue with local - no user interruption
-                    return self._local.generate_content(prompt)
-                else:
-                    raise
+                # Try to switch to next provider
+                if not self._switch_to_next(f"{error_type}: {str(e)[:40]}"):
+                    raise RuntimeError(f"All LLM providers failed. Last error: {e}")
 
-        # Gemini exhausted, try local
-        if self._local and self._local.is_available:
-            try:
-                return self._local.generate_content(prompt)
-            except Exception as e:
-                self.logger.error(f"[LLM] Local LLM also failed: {e}")
-                raise
-
-        raise RuntimeError("All LLM providers failed")
+        raise RuntimeError("All LLM providers exhausted")
 
 
 def create_llm_provider(config: "Config", logger: logging.Logger) -> Optional[LLMProvider]:
     """
     Create a robust LLM provider with automatic fallback.
 
-    Returns a FallbackLLMProvider that:
-    1. Tries Gemini API first (better quality)
-    2. Falls back to local LLM on quota errors
-    3. Local LLM completes what Gemini cannot
+    Provider Priority (configurable):
+    - Default: Gemini → Ollama → Local LLM
+    - PREFER_LOCAL_LLM=1: Local → Ollama → Gemini
+    - LLM_PROVIDER=local: Local only (no cloud)
+    - LLM_PROVIDER=ollama: Ollama only
+    - LLM_PROVIDER=gemini: Gemini only
 
-    Set PREFER_LOCAL_LLM=1 to always use local LLM first.
+    Returns a FallbackLLMProvider that automatically switches
+    on quota errors, rate limits, or API failures.
     """
-    # Check if user prefers local LLM
-    local_model = os.environ.get("LOCAL_LLM_MODEL", "")
-    prefer_local = os.environ.get("PREFER_LOCAL_LLM", "").lower() in ("1", "true", "yes")
-
-    if prefer_local or local_model:
-        # User explicitly wants local LLM
-        try:
-            provider = LocalLLMProvider(local_model if local_model else None)
-            if provider.is_available:
-                logger.info("[LLM] Using local model (user preference, no quotas)")
-                return provider
-        except Exception as e:
-            logger.debug(f"[LLM] Local LLM not available: {e}")
-
-    # Use fallback provider for automatic switching
+    # Use FallbackLLMProvider which handles all provider logic
     provider = FallbackLLMProvider(config, logger)
     if provider.is_available:
         return provider
@@ -378,6 +510,12 @@ class Config:
     LOCAL_LLM_AUTO_DOWNLOAD: bool = field(
         default_factory=lambda: os.environ.get("LOCAL_LLM_AUTO_DOWNLOAD", "").lower() in ("1", "true", "yes")
     )
+
+    # Ollama Configuration
+    # OLLAMA_HOST: Ollama server URL
+    OLLAMA_HOST: str = field(default_factory=lambda: os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
+    # OLLAMA_MODEL: Ollama model name
+    OLLAMA_MODEL: str = field(default_factory=lambda: os.environ.get("OLLAMA_MODEL", "llama3.2"))
 
     # Filesystem paths
     BASE_DIR: str = field(default_factory=lambda: os.path.dirname(os.path.abspath(__file__)))
