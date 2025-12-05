@@ -48,35 +48,58 @@ ASCII data flow:
 | NotionPublisher | `scripts/notion_publisher.py` | Notion API integration; markdown conversion; database sync |
 | FileOrganizer | `scripts/file_organizer.py` | Directory organization; archiving; index maintenance |
 | EconomicCalendar | `scripts/economic_calendar.py` | Event tracking; gold impact analysis; self-maintenance |
-| LocalLLM | `scripts/local_llm.py` | Local LLM provider abstraction (pyvdb/llama-cpp-python) |
+| LocalLLM | `scripts/local_llm.py` | Local LLM provider abstraction (llama-cpp-python, Ollama) |
 | InsightsEngine | `scripts/insights_engine.py` | Entity/action extraction; insight parsing |
 | TaskExecutor | `scripts/task_executor.py` | Autonomous task execution with retry logic |
 
 ## LLM Provider Architecture
 
-Gold Standard uses a **FallbackLLMProvider** pattern for resilient AI-powered analysis:
+Gold Standard uses a **FallbackLLMProvider** pattern for resilient AI-powered analysis with three provider tiers:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    FallbackLLMProvider                      │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────┐    ┌───────────┐    ┌──────────────────────┐  │
-│  │ Gemini  │ -> │ Local LLM │ -> │ Graceful Degradation │  │
-│  │ (Cloud) │    │ (pyvdb/   │    │ (Error Handling)     │  │
-│  │         │    │ llama-cpp)│    │                      │  │
-│  └─────────┘    └───────────┘    └──────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         FallbackLLMProvider                              │
+├──────────────────────────────────────────────────────────────────────────┤
+│  ┌──────────┐    ┌──────────┐    ┌───────────┐    ┌────────────────┐    │
+│  │  Gemini  │ -> │  Ollama  │ -> │ llama.cpp │ -> │ Error Handling │    │
+│  │  (Cloud) │    │ (Server) │    │  (Direct) │    │                │    │
+│  └──────────┘    └──────────┘    └───────────┘    └────────────────┘    │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Fallback Chain:**
-1. **Gemini (Primary)**: Cloud-based, high-quality analysis via Google AI
-2. **Local LLM (Secondary)**: On-device inference via pyvdb (native C++) or llama-cpp-python
-3. **Graceful Degradation**: Returns structured error when all providers fail
+**Provider Chain (Default Order):**
+1. **Gemini (Primary)**: Cloud-based, high-quality analysis via Google AI API
+2. **Ollama (Fallback 1)**: Local server with easy model management (requires `ollama serve`)
+3. **llama.cpp (Fallback 2)**: Direct on-device inference with any GGUF model
+4. **Graceful Degradation**: Returns structured error when all providers fail
 
-**Provider Selection:**
-- `scripts/local_llm.py` detects available backends at import time
-- `HAS_PYVDB`, `HAS_LLAMA_CPP_PYTHON` flags indicate availability
-- `BACKEND` variable shows active backend: `"pyvdb"`, `"llama-cpp-python"`, or `None`
+**Provider Selection Modes:**
+| Mode | Environment Variable | Provider Order |
+|------|---------------------|----------------|
+| Default | (none) | Gemini → Ollama → llama.cpp |
+| Local-First | `PREFER_LOCAL_LLM=1` | llama.cpp → Ollama → Gemini |
+| Local Only | `LLM_PROVIDER=local` | llama.cpp only |
+| Ollama Only | `LLM_PROVIDER=ollama` | Ollama only |
+| Gemini Only | `LLM_PROVIDER=gemini` | Gemini only |
+
+**Backend Detection (`scripts/local_llm.py`):**
+- `HAS_PYVDB`: Native C++ bindings available (Vector Studio)
+- `HAS_LLAMA_CPP_PYTHON`: Python llama.cpp bindings installed
+- `HAS_OLLAMA`: Ollama server running and accessible
+- `BACKEND`: Active local backend: `"pyvdb"`, `"llama-cpp-python"`, or `None`
+
+**Provider Classes:**
+| Class | Location | Description |
+|-------|----------|-------------|
+| `GeminiProvider` | `main.py` | Google Gemini API wrapper |
+| `OllamaProvider` | `main.py` | Ollama REST API wrapper |
+| `LocalLLMProvider` | `main.py` | llama-cpp-python wrapper |
+| `FallbackLLMProvider` | `main.py` | Orchestrates provider chain with auto-switching |
+| `OllamaLLM` | `scripts/local_llm.py` | Low-level Ollama client |
+| `LocalLLM` | `scripts/local_llm.py` | Low-level llama.cpp client |
+| `GeminiCompatibleLLM` | `scripts/local_llm.py` | Gemini-compatible wrapper for local models |
+
+> **📖 See [docs/LLM_PROVIDERS.md](LLM_PROVIDERS.md) for complete setup and configuration guide.**
 
 Key design notes:
 - Each module exposes a small public API surface, documented in docstrings and validated by unit tests.
