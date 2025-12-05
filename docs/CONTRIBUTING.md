@@ -278,14 +278,14 @@ Use Google-style docstrings:
 ```python
 def fetch_data(ticker: str, period: str = "1y") -> Optional[pd.DataFrame]:
     """Fetch market data for a ticker.
-    
+
     Args:
         ticker: The stock/futures ticker symbol.
         period: Data period (e.g., "1y", "6mo", "1d").
-    
+
     Returns:
         DataFrame with OHLCV data, or None if fetch fails.
-    
+
     Raises:
         ValueError: If ticker format is invalid.
     """

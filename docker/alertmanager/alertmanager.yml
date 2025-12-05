@@ -18,7 +18,7 @@ route:
   repeat_interval: 4h
   # Default receiver
   receiver: 'default-receiver'
-  
+
   # Child routes
   routes:
     # Critical alerts - immediate notification
@@ -27,7 +27,7 @@ route:
       receiver: 'critical-receiver'
       group_wait: 10s
       repeat_interval: 1h
-    
+
     # Warning alerts - batched
     - match:
         severity: warning

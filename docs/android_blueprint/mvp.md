@@ -6,10 +6,10 @@
 
 ## 1. **Technology Stack**
 
-**Language:**  
+**Language:**
 - Kotlin (entire codebase)
 
-**Frameworks/Libraries:**  
+**Frameworks/Libraries:**
 - Jetpack Compose (UI)
 - Retrofit & OkHttp (network requests)
 - Gson (JSON parsing)
@@ -20,7 +20,7 @@
 - Coroutines + Flow/LiveData (async, data stream)
 - Material 3 (theming/components)
 
-**Minimum SDK:**  
+**Minimum SDK:**
 - 24 (Android 7.0 Nougat)
 
 ---
@@ -74,7 +74,7 @@ data class IndicatorValues(val rsi: Float, val sma: Float)
 
 ## 4. **Networking Layer (data/network/)**
 
-- **Market API:**  
+- **Market API:**
   - Use Yahoo Finance or Alpha Vantage
   - Example endpoint: `https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1d&range=3mo`
 
@@ -121,7 +121,7 @@ Handles multi-source data ops (network & local):
 ```kotlin
 @Singleton
 class GoldRepository @Inject constructor(
-    private val api: GoldApiService, 
+    private val api: GoldApiService,
     private val reportDao: ReportDao
 ) {
     suspend fun getCurrentGoldPrice(): Float { ... }
@@ -145,7 +145,7 @@ class GoldRepository @Inject constructor(
 - Each screen gets its own ViewModel.
 - Hold UI state, interact with repositories, and expose data as StateFlow for Compose.
 
---- 
+---
 
 ## 9. **UI Layer (ui/) with Jetpack Compose**
 

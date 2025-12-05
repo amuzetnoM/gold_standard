@@ -1,33 +1,34 @@
 #!/usr/bin/env python3
 # ══════════════════════════════════════════════════════════════════════════════
-#  _________._____________.___ ____ ___  _________      .__         .__            
-# /   _____/|   \______   \   |    |   \/   _____/____  |  | ______ |  |__ _____   
-# \_____  \ |   ||       _/   |    |   /\_____  \__  \ |  | \____ \|  |  \__  \  
+#  _________._____________.___ ____ ___  _________      .__         .__
+# /   _____/|   \______   \   |    |   \/   _____/____  |  | ______ |  |__ _____
+# \_____  \ |   ||       _/   |    |   /\_____  \__  \ |  | \____ \|  |  \__  \
 # /        \|   ||    |   \   |    |  / /        \/ __ \|  |_|  |_> >   Y  \/ __ \_
 # /_______  /|___||____|_  /___|______/ /_______  (____  /____/   __/|___|  (____  /
-#         \/             \/                     \/     \/     |__|        \/     \/ 
+#         \/             \/                     \/     \/     |__|        \/     \/
 #
 # Gold Standard - Precious Metals Intelligence System
 # Copyright (c) 2025 SIRIUS Alpha
 # All rights reserved.
 # ══════════════════════════════════════════════════════════════════════════════
-import os
-import sys
-import re
-import json
-from dotenv import load_dotenv
-import time
-import signal
-import logging
-from logging.handlers import RotatingFileHandler
-import datetime
-import filelock
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
-
-import schedule
 import argparse
+import datetime
+import json
+import logging
+import os
+import re
+import signal
+import sys
+import time
+from dataclasses import dataclass, field
+from logging.handlers import RotatingFileHandler
+from typing import Any, Dict, List, Optional, Tuple
+
+import filelock
 import pandas as pd
+import schedule
+from dotenv import load_dotenv
+
 try:
     import pandas_ta as ta
 except Exception:
@@ -61,37 +62,41 @@ except Exception:
 
         @staticmethod
         def adx(high, low, close, length=14):
-                # Basic ADX implementation compatible with pandas Series input (fallback).
-                try:
-                    prev_close = close.shift(1)
-                    tr1 = high - low
-                    tr2 = (high - prev_close).abs()
-                    tr3 = (low - prev_close).abs()
-                    tr = _pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                    atr = tr.rolling(window=length, min_periods=length).mean()
+            # Basic ADX implementation compatible with pandas Series input (fallback).
+            try:
+                prev_close = close.shift(1)
+                tr1 = high - low
+                tr2 = (high - prev_close).abs()
+                tr3 = (low - prev_close).abs()
+                tr = _pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                atr = tr.rolling(window=length, min_periods=length).mean()
 
-                    up_move = high.diff()
-                    down_move = -low.diff()
-                    # Use where to avoid setting dtype incompatible warnings
-                    plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
-                    minus_dm = (-down_move).where((down_move > up_move) & (down_move > 0), 0.0)
+                up_move = high.diff()
+                down_move = -low.diff()
+                # Use where to avoid setting dtype incompatible warnings
+                plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+                minus_dm = (-down_move).where((down_move > up_move) & (down_move > 0), 0.0)
 
-                    plus_di = (plus_dm.rolling(window=length, min_periods=length).sum() / atr) * 100
-                    minus_di = (minus_dm.rolling(window=length, min_periods=length).sum() / atr) * 100
+                plus_di = (plus_dm.rolling(window=length, min_periods=length).sum() / atr) * 100
+                minus_di = (minus_dm.rolling(window=length, min_periods=length).sum() / atr) * 100
 
-                    dx = (plus_di - minus_di).abs() / (plus_di + minus_di) * 100
-                    adx = dx.rolling(window=length, min_periods=length).mean()
+                dx = (plus_di - minus_di).abs() / (plus_di + minus_di) * 100
+                adx = dx.rolling(window=length, min_periods=length).mean()
 
-                    df = _pd.concat([adx.rename(f'ADX_{length}'), plus_di.rename(f'DMP_{length}'), minus_di.rename(f'DMN_{length}')], axis=1)
-                    return df
-                except Exception:
-                    return None
+                df = _pd.concat(
+                    [adx.rename(f"ADX_{length}"), plus_di.rename(f"DMP_{length}"), minus_di.rename(f"DMN_{length}")],
+                    axis=1,
+                )
+                return df
+            except Exception:
+                return None
 
     ta = _FallbackTA()
-import yfinance as yf
-import mplfinance as mpf
 import google.generativeai as genai
-from colorama import Fore, Back, Style, init
+import mplfinance as mpf
+import yfinance as yf
+from colorama import init
+
 
 # ==========================================
 # CONFIGURATION
@@ -99,57 +104,58 @@ from colorama import Fore, Back, Style, init
 @dataclass
 class Config:
     """Central configuration with sensible defaults."""
+
     # API Configuration
     # Read API key from environment; do not hardcode secrets
     GEMINI_API_KEY: str = field(default_factory=lambda: os.environ.get("GEMINI_API_KEY", ""))
     # Use an available model name from Google GenAI model list.
     # Default will work for the current API: 'models/gemini-pro-latest'
     GEMINI_MODEL: str = "models/gemini-pro-latest"
-    
+
     # Filesystem paths
     BASE_DIR: str = field(default_factory=lambda: os.path.dirname(os.path.abspath(__file__)))
-    
+
     @property
     def OUTPUT_DIR(self) -> str:
         return os.path.join(self.BASE_DIR, "output")
-    
+
     @property
     def CHARTS_DIR(self) -> str:
         return os.path.join(self.OUTPUT_DIR, "charts")
-    
+
     @property
     def MEMORY_FILE(self) -> str:
         return os.path.join(self.BASE_DIR, "cortex_memory.json")
-    
+
     @property
     def LOCK_FILE(self) -> str:
         return os.path.join(self.BASE_DIR, "cortex_memory.lock")
-    
+
     # Technical Analysis Thresholds
     ADX_TREND_THRESHOLD: float = 25.0
     GSR_HIGH_THRESHOLD: float = 85.0  # Gold/Silver ratio - Silver cheap
-    GSR_LOW_THRESHOLD: float = 75.0   # Gold/Silver ratio - Gold cheap
+    GSR_LOW_THRESHOLD: float = 75.0  # Gold/Silver ratio - Gold cheap
     VIX_HIGH_THRESHOLD: float = 20.0  # High volatility threshold
     RSI_OVERBOUGHT: float = 70.0
     RSI_OVERSOLD: float = 30.0
-    
+
     # Data Settings
     DATA_PERIOD: str = "1y"
     DATA_INTERVAL: str = "1d"
     CHART_CANDLE_COUNT: int = 100
     MAX_HISTORY_ENTRIES: int = 5
     MAX_CHART_AGE_DAYS: int = 7
-    
+
     # Scheduling - NEW: Minutes-based for high-frequency operation
     # Default to 1-minute cycles for real-time intelligence
     RUN_INTERVAL_MINUTES: int = 1
     RUN_INTERVAL_HOURS: int = 0  # Legacy support - set to 0 when using minutes
-    
+
     # Insights & Task Execution
     ENABLE_INSIGHTS_EXTRACTION: bool = True
     ENABLE_TASK_EXECUTION: bool = True
     MAX_TASKS_PER_CYCLE: int = 10
-    
+
     # File Organization
     ENABLE_AUTO_ORGANIZE: bool = True
     ARCHIVE_DAYS_THRESHOLD: int = 7
@@ -157,16 +163,17 @@ class Config:
 
 # Asset Universe Configuration
 ASSETS: Dict[str, Dict[str, str]] = {
-    'GOLD':   {'p': 'GC=F', 'b': 'GLD', 'name': 'Gold Futures'},
-    'SILVER': {'p': 'SI=F', 'b': 'SLV', 'name': 'Silver Futures'},
-    'DXY':    {'p': 'DX-Y.NYB', 'b': 'UUP', 'name': 'Dollar Index'},
-    'YIELD':  {'p': '^TNX', 'b': 'IEF', 'name': 'US 10Y Yield'},
-    'VIX':    {'p': '^VIX', 'b': '^VIX', 'name': 'Volatility Index'},
-    'SPX':    {'p': '^GSPC', 'b': 'SPY', 'name': 'S&P 500'}
+    "GOLD": {"p": "GC=F", "b": "GLD", "name": "Gold Futures"},
+    "SILVER": {"p": "SI=F", "b": "SLV", "name": "Silver Futures"},
+    "DXY": {"p": "DX-Y.NYB", "b": "UUP", "name": "Dollar Index"},
+    "YIELD": {"p": "^TNX", "b": "IEF", "name": "US 10Y Yield"},
+    "VIX": {"p": "^VIX", "b": "^VIX", "name": "Volatility Index"},
+    "SPX": {"p": "^GSPC", "b": "SPY", "name": "S&P 500"},
 }
 
 # Global state for graceful shutdown
 shutdown_requested = False
+
 
 # ==========================================
 # LOGGING SETUP
@@ -175,32 +182,27 @@ def setup_logging(config: Config) -> logging.Logger:
     """Configure structured logging with file and console handlers."""
     logger = logging.getLogger("GoldStandard")
     logger.setLevel(logging.DEBUG)
-    
+
     # Prevent duplicate handlers
     if logger.handlers:
         return logger
-    
+
     # Console handler with colors
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
-    console_format = logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    console_format = logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     console_handler.setFormatter(console_format)
     logger.addHandler(console_handler)
-    
+
     # File handler for detailed logs (rotating)
     log_file = os.path.join(config.OUTPUT_DIR, "gold_standard.log")
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
-    file_handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8')
+    file_handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
-    file_format = logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(name)s | %(funcName)s:%(lineno)d | %(message)s'
-    )
+    file_format = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(funcName)s:%(lineno)d | %(message)s")
     file_handler.setFormatter(file_format)
     logger.addHandler(file_handler)
-    
+
     return logger
 
 
@@ -210,22 +212,25 @@ def strip_emojis(text: str) -> str:
     """
     try:
         import re
+
         emoji_pattern = re.compile(
-            "[\U0001F600-\U0001F64F"  # emoticons
-            "\U0001F300-\U0001F5FF"  # symbols & pictographs
-            "\U0001F680-\U0001F6FF"  # transport & map symbols
-            "\U0001F700-\U0001F77F"  # alchemical symbols
-            "\U0001F780-\U0001F7FF"  # Geometric Shapes Extended
-            "\U0001F800-\U0001F8FF"  # Supplemental Arrows-C
-            "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
-            "\U0001FA00-\U0001FA6F"  # Chess Symbols etc
-            "\U00002600-\U000026FF"  # Misc symbols
-            "\U00002700-\U000027BF"  # Dingbats
-            "]+", flags=re.UNICODE)
-        return emoji_pattern.sub(r'', text)
+            "[\U0001f600-\U0001f64f"  # emoticons
+            "\U0001f300-\U0001f5ff"  # symbols & pictographs
+            "\U0001f680-\U0001f6ff"  # transport & map symbols
+            "\U0001f700-\U0001f77f"  # alchemical symbols
+            "\U0001f780-\U0001f7ff"  # Geometric Shapes Extended
+            "\U0001f800-\U0001f8ff"  # Supplemental Arrows-C
+            "\U0001f900-\U0001f9ff"  # Supplemental Symbols and Pictographs
+            "\U0001fa00-\U0001fa6f"  # Chess Symbols etc
+            "\U00002600-\U000026ff"  # Misc symbols
+            "\U00002700-\U000027bf"  # Dingbats
+            "]+",
+            flags=re.UNICODE,
+        )
+        return emoji_pattern.sub(r"", text)
     except Exception:
         # Fallback: naive filter keeping ascii and basic punctuation
-        return ''.join(ch for ch in text if ord(ch) < 10000)
+        return "".join(ch for ch in text if ord(ch) < 10000)
 
 
 # ==========================================
@@ -248,7 +253,7 @@ class Cortex:
     Tracks predictions, grades performance, and manages hypothetical trade positions.
     Uses file locking to prevent corruption from concurrent access.
     """
-    
+
     def __init__(self, config: Config, logger: logging.Logger):
         self.config = config
         self.logger = logger
@@ -276,26 +281,21 @@ class Cortex:
             "current_regime": "UNKNOWN",
             "confidence_level": 0.5,
             "invalidation_triggers": [],
-            "key_levels": {
-                "support": [],
-                "resistance": [],
-                "stop_loss": None,
-                "take_profit": []
-            }
+            "key_levels": {"support": [], "resistance": [], "stop_loss": None, "take_profit": []},
         }
-        
+
         try:
-            template_path = os.path.join(self.config.BASE_DIR, 'cortex_memory.template.json')
+            template_path = os.path.join(self.config.BASE_DIR, "cortex_memory.template.json")
             with self.lock:
                 if not os.path.exists(self.config.MEMORY_FILE) and os.path.exists(template_path):
-                    with open(template_path, 'r', encoding='utf-8') as t:
+                    with open(template_path, "r", encoding="utf-8") as t:
                         template_content = t.read()
-                    with open(self.config.MEMORY_FILE, 'w', encoding='utf-8') as f:
+                    with open(self.config.MEMORY_FILE, "w", encoding="utf-8") as f:
                         f.write(template_content)
                     self.logger.debug(f"Initialized memory file from template: {self.config.MEMORY_FILE}")
 
                 if os.path.exists(self.config.MEMORY_FILE):
-                    with open(self.config.MEMORY_FILE, 'r', encoding='utf-8') as f:
+                    with open(self.config.MEMORY_FILE, "r", encoding="utf-8") as f:
                         loaded = json.load(f)
                         return {**default_memory, **loaded}
         except filelock.Timeout:
@@ -304,14 +304,14 @@ class Cortex:
             self.logger.error(f"Memory file corrupted: {e}. Starting fresh.")
         except Exception as e:
             self.logger.error(f"Error loading memory: {e}")
-        
+
         return default_memory
 
     def _save_memory(self) -> bool:
         """Persist memory to JSON file."""
         try:
             with self.lock:
-                with open(self.config.MEMORY_FILE, 'w', encoding='utf-8') as f:
+                with open(self.config.MEMORY_FILE, "w", encoding="utf-8") as f:
                     json.dump(self.memory, f, indent=4)
             return True
         except filelock.Timeout:
@@ -320,30 +320,41 @@ class Cortex:
             self.logger.error(f"Error saving memory: {e}")
         return False
 
-    def update_memory(self, bias: str, current_gold_price: float, 
-                     regime: str = None, confidence: float = None,
-                     key_levels: Dict = None) -> None:
+    def update_memory(
+        self,
+        bias: str,
+        current_gold_price: float,
+        regime: str = None,
+        confidence: float = None,
+        key_levels: Dict = None,
+    ) -> None:
         """Save current state for the next run to judge."""
         self.memory["last_bias"] = bias
         self.memory["last_price_gold"] = current_gold_price
         self.memory["last_update"] = datetime.datetime.now().isoformat()
-        
+
         if regime:
             self.memory["current_regime"] = regime
         if confidence is not None:
             self.memory["confidence_level"] = confidence
         if key_levels:
             self.memory["key_levels"].update(key_levels)
-        
+
         self._save_memory()
         self.logger.debug(f"Memory updated: bias={bias}, price={current_gold_price}")
 
     # ------------------------------------------
     # Trade Simulation System
     # ------------------------------------------
-    def open_trade(self, direction: str, entry_price: float, 
-                   stop_loss: float, take_profit: List[float],
-                   size: float = 1.0, rationale: str = "") -> Dict:
+    def open_trade(
+        self,
+        direction: str,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: List[float],
+        size: float = 1.0,
+        rationale: str = "",
+    ) -> Dict:
         """
         Open a hypothetical trade position.
         Direction: LONG or SHORT
@@ -362,13 +373,13 @@ class Cortex:
             "unrealized_pnl": 0.0,
             "unrealized_pnl_pct": 0.0,
             "partial_exits": [],
-            "trailing_stop": None
+            "trailing_stop": None,
         }
-        
+
         self.memory["active_trades"].append(trade)
         self.memory["trade_count"] = trade["id"]
         self._save_memory()
-        
+
         self.logger.info(f"[TRADE] Opened {direction} @ ${entry_price:.2f} | SL: ${stop_loss:.2f} | TP: {take_profit}")
         return trade
 
@@ -377,20 +388,20 @@ class Cortex:
         Update all active trades with current prices.
         Returns list of any trades that hit SL or TP.
         """
-        gold_price = current_prices.get('GOLD', 0)
+        gold_price = current_prices.get("GOLD", 0)
         if not gold_price:
             return []
-        
+
         triggered_trades = []
-        
+
         for trade in self.memory.get("active_trades", []):
             if trade["status"] != "OPEN":
                 continue
-            
+
             trade["current_price"] = gold_price
             entry = trade["entry_price"]
             direction = trade["direction"]
-            
+
             # Calculate unrealized PnL
             if direction == "LONG":
                 pnl = (gold_price - entry) * trade["size"]
@@ -398,10 +409,10 @@ class Cortex:
             else:  # SHORT
                 pnl = (entry - gold_price) * trade["size"]
                 pnl_pct = ((entry - gold_price) / entry) * 100
-            
+
             trade["unrealized_pnl"] = round(pnl, 2)
             trade["unrealized_pnl_pct"] = round(pnl_pct, 2)
-            
+
             # Check stop loss
             if direction == "LONG" and gold_price <= trade["stop_loss"]:
                 trade["exit_reason"] = "STOP_LOSS"
@@ -409,7 +420,7 @@ class Cortex:
             elif direction == "SHORT" and gold_price >= trade["stop_loss"]:
                 trade["exit_reason"] = "STOP_LOSS"
                 triggered_trades.append(trade)
-            
+
             # Check take profits (first target)
             if trade["take_profit"]:
                 first_tp = trade["take_profit"][0]
@@ -419,26 +430,25 @@ class Cortex:
                 elif direction == "SHORT" and gold_price <= first_tp:
                     trade["exit_reason"] = "TAKE_PROFIT"
                     triggered_trades.append(trade)
-        
+
         self._save_memory()
         return triggered_trades
 
-    def close_trade(self, trade_id: int, exit_price: float, 
-                    reason: str = "MANUAL") -> Optional[Dict]:
+    def close_trade(self, trade_id: int, exit_price: float, reason: str = "MANUAL") -> Optional[Dict]:
         """Close an active trade and record results."""
         for i, trade in enumerate(self.memory.get("active_trades", [])):
             if trade["id"] == trade_id:
                 # Calculate final PnL
                 entry = trade["entry_price"]
                 direction = trade["direction"]
-                
+
                 if direction == "LONG":
                     pnl = (exit_price - entry) * trade["size"]
                     pnl_pct = ((exit_price - entry) / entry) * 100
                 else:
                     pnl = (entry - exit_price) * trade["size"]
                     pnl_pct = ((entry - exit_price) / entry) * 100
-                
+
                 # Update trade record
                 trade["status"] = "CLOSED"
                 trade["exit_price"] = exit_price
@@ -447,14 +457,12 @@ class Cortex:
                 trade["realized_pnl"] = round(pnl, 2)
                 trade["realized_pnl_pct"] = round(pnl_pct, 2)
                 trade["result"] = "WIN" if pnl > 0 else "LOSS" if pnl < 0 else "BREAKEVEN"
-                
+
                 # Move to closed trades
                 self.memory["active_trades"].pop(i)
                 self.memory["closed_trades"].append(trade)
-                self.memory["total_pnl"] = round(
-                    self.memory.get("total_pnl", 0) + pnl, 2
-                )
-                
+                self.memory["total_pnl"] = round(self.memory.get("total_pnl", 0) + pnl, 2)
+
                 # Update win/loss stats
                 if trade["result"] == "WIN":
                     self.memory["total_wins"] = self.memory.get("total_wins", 0) + 1
@@ -464,14 +472,14 @@ class Cortex:
                     self.memory["total_losses"] = self.memory.get("total_losses", 0) + 1
                     self.memory["loss_streak"] = self.memory.get("loss_streak", 0) + 1
                     self.memory["win_streak"] = 0
-                
+
                 self._save_memory()
                 self.logger.info(
                     f"[TRADE] Closed #{trade_id} @ ${exit_price:.2f} | "
                     f"PnL: ${pnl:.2f} ({pnl_pct:+.2f}%) | {trade['result']}"
                 )
                 return trade
-        
+
         return None
 
     def update_trailing_stop(self, trade_id: int, new_stop: float) -> bool:
@@ -494,11 +502,11 @@ class Cortex:
         """Get trading performance summary."""
         closed = self.memory.get("closed_trades", [])
         active = self.memory.get("active_trades", [])
-        
+
         total_trades = len(closed)
         wins = sum(1 for t in closed if t.get("result") == "WIN")
         losses = sum(1 for t in closed if t.get("result") == "LOSS")
-        
+
         return {
             "total_trades": total_trades,
             "active_positions": len(active),
@@ -507,7 +515,7 @@ class Cortex:
             "win_rate": (wins / total_trades * 100) if total_trades > 0 else 0,
             "total_pnl": self.memory.get("total_pnl", 0),
             "win_streak": self.memory.get("win_streak", 0),
-            "loss_streak": self.memory.get("loss_streak", 0)
+            "loss_streak": self.memory.get("loss_streak", 0),
         }
 
     # ------------------------------------------
@@ -524,7 +532,7 @@ class Cortex:
         bias = self.memory["last_bias"]
         delta = current_gold_price - prev_price
         delta_pct = (delta / prev_price) * 100 if prev_price else 0
-        
+
         result = "NEUTRAL"
         if bias == "BULLISH" and delta > 0:
             result = "WIN"
@@ -546,7 +554,7 @@ class Cortex:
             self.memory["loss_streak"] = self.memory.get("loss_streak", 0) + 1
             self.memory["win_streak"] = 0
             self.memory["total_losses"] = self.memory.get("total_losses", 0) + 1
-        
+
         # Log the result
         entry = {
             "timestamp": datetime.datetime.now().isoformat(),
@@ -554,34 +562,34 @@ class Cortex:
             "prev_price": prev_price,
             "current_price": current_gold_price,
             "delta_pct": round(delta_pct, 2),
-            "result": result
+            "result": result,
         }
         self.memory["history"].append(entry)
-        
+
         # Keep history bounded
         max_history = self.config.MAX_HISTORY_ENTRIES
         if len(self.memory["history"]) > max_history:
             self.memory["history"] = self.memory["history"][-max_history:]
-        
+
         self.logger.info(
             f"Performance graded: {bias} @ ${prev_price:.2f} -> ${current_gold_price:.2f} "
             f"({delta_pct:+.2f}%) = {result}"
         )
-        
+
         return result
-    
+
     def get_win_rate(self) -> Optional[float]:
         """Calculate win rate percentage."""
         total = self.memory.get("total_wins", 0) + self.memory.get("total_losses", 0)
         if total == 0:
             return None
         return (self.memory.get("total_wins", 0) / total) * 100
-    
+
     def get_formatted_history(self) -> str:
         """Format history for AI context."""
         if not self.memory.get("history"):
             return "No previous predictions recorded."
-        
+
         lines = []
         for entry in self.memory["history"]:
             if isinstance(entry, dict):
@@ -593,7 +601,7 @@ class Cortex:
             else:
                 # Legacy string format
                 lines.append(f"- {entry}")
-        
+
         win_rate = self.get_win_rate()
         stats = f"\nWin Rate: {win_rate:.1f}%" if win_rate is not None else ""
         streak_info = ""
@@ -601,7 +609,7 @@ class Cortex:
             streak_info = f" | Current Win Streak: {self.memory['win_streak']}"
         elif self.memory.get("loss_streak", 0) > 0:
             streak_info = f" | Current Loss Streak: {self.memory['loss_streak']}"
-        
+
         return "\n".join(lines) + stats + streak_info
 
 
@@ -612,7 +620,7 @@ class QuantEngine:
     """
     Handles market data fetching, technical indicator calculation, and chart generation.
     """
-    
+
     def __init__(self, config: Config, logger: logging.Logger):
         self.config = config
         self.logger = logger
@@ -622,51 +630,51 @@ class QuantEngine:
     def get_data(self) -> Optional[Dict[str, Any]]:
         """Fetch and process data for all tracked assets."""
         self.logger.info("Engaging Quant Engine - fetching market data...")
-        self.logger.info(f"[SYSTEM] Engaging Quant Engine...")
-        
+        self.logger.info("[SYSTEM] Engaging Quant Engine...")
+
         snapshot: Dict[str, Any] = {}
         self.news = []
-        
+
         # Ensure charts directory exists
         os.makedirs(self.config.CHARTS_DIR, exist_ok=True)
-        
+
         # Clean up old charts
         self._cleanup_old_charts()
-        
+
         # Fetch data for each asset
         for key, conf in ASSETS.items():
             conf = ASSETS[key]
             try:
-                df = self._fetch(conf['p'], conf['b'])
+                df = self._fetch(conf["p"], conf["b"])
                 if df is None or df.empty:
                     self.logger.warning(f"No data available for {key}")
                     continue
-                
+
                 latest = df.iloc[-1]
                 previous = df.iloc[-2] if len(df) > 1 else latest
-                
+
                 # Safely extract values with validation
-                close_price = self._safe_float(latest.get('Close'))
-                prev_close = self._safe_float(previous.get('Close'))
-                rsi = self._safe_float(latest.get('RSI'))
-                adx = self._safe_float(latest.get('ADX_14'))
-                atr = self._safe_float(latest.get('ATR'))
-                sma200 = self._safe_float(latest.get('SMA_200'))
-                
+                close_price = self._safe_float(latest.get("Close"))
+                prev_close = self._safe_float(previous.get("Close"))
+                rsi = self._safe_float(latest.get("RSI"))
+                adx = self._safe_float(latest.get("ADX_14"))
+                atr = self._safe_float(latest.get("ATR"))
+                sma200 = self._safe_float(latest.get("SMA_200"))
+
                 if close_price is None:
                     self.logger.warning(f"Invalid close price for {key}")
                     continue
-                
+
                 # Calculate change percentage
                 change_pct = 0.0
                 if prev_close and prev_close != 0:
                     change_pct = ((close_price - prev_close) / prev_close) * 100
-                
+
                 # Determine market regime based on ADX
                 regime = "UNKNOWN"
                 if adx is not None:
                     regime = "TRENDING" if adx > self.config.ADX_TREND_THRESHOLD else "CHOPPY/RANGING"
-                
+
                 snapshot[key] = {
                     "price": round(close_price, 2),
                     "change": round(change_pct, 2),
@@ -674,34 +682,34 @@ class QuantEngine:
                     "adx": round(adx, 2) if adx is not None else None,
                     "atr": round(atr, 2) if atr is not None else None,
                     "regime": regime,
-                    "sma200": round(sma200, 2) if sma200 is not None else None
+                    "sma200": round(sma200, 2) if sma200 is not None else None,
                 }
-                
+
                 # Fetch news headlines
-                self._fetch_news(key, conf['p'])
-                
+                self._fetch_news(key, conf["p"])
+
                 # Generate chart
                 self._chart(key, df)
-                
+
                 self.logger.debug(f"Processed {key}: ${close_price:.2f} ({change_pct:+.2f}%)")
-                
+
             except Exception as e:
                 self.logger.error(f"Error processing {key}: {e}", exc_info=True)
                 continue
-        
+
         if not snapshot:
             self.logger.error("Failed to fetch any market data")
             return None
-        
+
         # Calculate intermarket ratios
-        if 'GOLD' in snapshot and 'SILVER' in snapshot:
-            gold_price = snapshot['GOLD']['price']
-            silver_price = snapshot['SILVER']['price']
+        if "GOLD" in snapshot and "SILVER" in snapshot:
+            gold_price = snapshot["GOLD"]["price"]
+            silver_price = snapshot["SILVER"]["price"]
             if silver_price and silver_price > 0:
                 gsr = round(gold_price / silver_price, 2)
-                snapshot['RATIOS'] = {'GSR': gsr}
+                snapshot["RATIOS"] = {"GSR": gsr}
                 self.logger.info(f"Gold/Silver Ratio: {gsr}")
-        
+
         return snapshot
 
     def _safe_float(self, value: Any) -> Optional[float]:
@@ -729,15 +737,15 @@ class QuantEngine:
                     interval=self.config.DATA_INTERVAL,
                     progress=False,
                     multi_level_index=False,
-                    auto_adjust=True
+                    auto_adjust=True,
                 )
-                
+
                 if df.empty:
                     self.logger.debug(f"No data returned for {ticker}")
                     continue
-                
+
                 # Validate minimal columns exist
-                required_columns = ['Open', 'High', 'Low', 'Close']
+                required_columns = ["Open", "High", "Low", "Close"]
                 if not all(col in df.columns for col in required_columns):
                     self.logger.warning(f"Missing required OHLC columns for {ticker}: {df.columns}")
                     continue
@@ -757,7 +765,9 @@ class QuantEngine:
                         else:
                             s = pd.Series(out, index=df.index)
                         if len(s) != len(df):
-                            self.logger.warning(f"Indicator {name} returned {len(s)} values for {ticker} but df has {len(df)} index; ignoring {name}")
+                            self.logger.warning(
+                                f"Indicator {name} returned {len(s)} values for {ticker} but df has {len(df)} index; ignoring {name}"
+                            )
                             return None
                         return s
                     except Exception as e:
@@ -767,10 +777,10 @@ class QuantEngine:
                 # Compute indicators with backoff to fallback implementations
                 try:
                     # RSI
-                    rsi_series = safe_indicator_series('RSI', ta.rsi, df['Close'], length=14)
+                    rsi_series = safe_indicator_series("RSI", ta.rsi, df["Close"], length=14)
                     if rsi_series is None:
                         # fallback computation
-                        delta = df['Close'].diff()
+                        delta = df["Close"].diff()
                         up = delta.clip(lower=0)
                         down = -delta.clip(upper=0)
                         ma_up = up.rolling(window=14, min_periods=14).mean()
@@ -782,39 +792,39 @@ class QuantEngine:
                     rsi_series = None
 
                 try:
-                    sma200 = safe_indicator_series('SMA_200', ta.sma, df['Close'], length=200)
+                    sma200 = safe_indicator_series("SMA_200", ta.sma, df["Close"], length=200)
                     if sma200 is None:
                         # fallback SMA using pandas rolling mean
-                        sma200 = df['Close'].rolling(window=200, min_periods=1).mean()
+                        sma200 = df["Close"].rolling(window=200, min_periods=1).mean()
                 except Exception as e:
                     self.logger.warning(f"SMA_200 computation failed for {ticker}: {e}")
                     # fallback SMA using pandas rolling mean
                     try:
-                        sma200 = df['Close'].rolling(window=200, min_periods=1).mean()
+                        sma200 = df["Close"].rolling(window=200, min_periods=1).mean()
                     except Exception:
                         sma200 = None
 
                 try:
-                    sma50 = safe_indicator_series('SMA_50', ta.sma, df['Close'], length=50)
+                    sma50 = safe_indicator_series("SMA_50", ta.sma, df["Close"], length=50)
                     if sma50 is None:
                         # fallback SMA using pandas rolling mean
-                        sma50 = df['Close'].rolling(window=50, min_periods=1).mean()
+                        sma50 = df["Close"].rolling(window=50, min_periods=1).mean()
                 except Exception as e:
                     self.logger.warning(f"SMA_50 computation failed for {ticker}: {e}")
                     # fallback SMA using pandas rolling mean
                     try:
-                        sma50 = df['Close'].rolling(window=50, min_periods=1).mean()
+                        sma50 = df["Close"].rolling(window=50, min_periods=1).mean()
                     except Exception:
                         sma50 = None
 
                 try:
-                    atr_series = safe_indicator_series('ATR', ta.atr, df['High'], df['Low'], df['Close'], length=14)
+                    atr_series = safe_indicator_series("ATR", ta.atr, df["High"], df["Low"], df["Close"], length=14)
                     if atr_series is None:
                         # fallback ATR as rolling mean of TR
-                        prev_close = df['Close'].shift(1)
-                        tr1 = df['High'] - df['Low']
-                        tr2 = (df['High'] - prev_close).abs()
-                        tr3 = (df['Low'] - prev_close).abs()
+                        prev_close = df["Close"].shift(1)
+                        tr1 = df["High"] - df["Low"]
+                        tr2 = (df["High"] - prev_close).abs()
+                        tr3 = (df["Low"] - prev_close).abs()
                         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
                         atr_series = tr.rolling(window=14, min_periods=14).mean()
                 except Exception as e:
@@ -826,7 +836,7 @@ class QuantEngine:
                     adx_df = None
                     raw_adx = None
                     try:
-                        raw_adx = ta.adx(df['High'], df['Low'], df['Close'], length=14)
+                        raw_adx = ta.adx(df["High"], df["Low"], df["Close"], length=14)
                     except Exception:
                         raw_adx = None
                     if raw_adx is not None:
@@ -837,54 +847,54 @@ class QuantEngine:
                             adx_df = None
                     if adx_df is None:
                         # fallback ADX
-                        prev_close = df['Close'].shift(1)
-                        tr1 = df['High'] - df['Low']
-                        tr2 = (df['High'] - prev_close).abs()
-                        tr3 = (df['Low'] - prev_close).abs()
+                        prev_close = df["Close"].shift(1)
+                        tr1 = df["High"] - df["Low"]
+                        tr2 = (df["High"] - prev_close).abs()
+                        tr3 = (df["Low"] - prev_close).abs()
                         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
                         atr = tr.rolling(window=14, min_periods=14).mean()
-                        up_move = df['High'].diff()
-                        down_move = -df['Low'].diff()
+                        up_move = df["High"].diff()
+                        down_move = -df["Low"].diff()
                         plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
                         minus_dm = (-down_move).where((down_move > up_move) & (down_move > 0), 0.0)
                         plus_di = (plus_dm.rolling(window=14, min_periods=14).sum() / atr) * 100
                         minus_di = (minus_dm.rolling(window=14, min_periods=14).sum() / atr) * 100
                         dx = (plus_di - minus_di).abs() / (plus_di + minus_di) * 100
                         adx_ser = dx.rolling(window=14, min_periods=14).mean()
-                        adx_df = pd.DataFrame({f'ADX_14': adx_ser, f'DMP_14': plus_di, f'DMN_14': minus_di})
+                        adx_df = pd.DataFrame({"ADX_14": adx_ser, "DMP_14": plus_di, "DMN_14": minus_di})
                 except Exception as e:
                     self.logger.warning(f"ADX computation failed for {ticker}: {e}")
                     adx_df = None
 
                 # Assign computed indicators if present
                 if rsi_series is not None:
-                    df['RSI'] = rsi_series
+                    df["RSI"] = rsi_series
                 if sma200 is not None:
-                    df['SMA_200'] = sma200
+                    df["SMA_200"] = sma200
                 if sma50 is not None:
-                    df['SMA_50'] = sma50
+                    df["SMA_50"] = sma50
                 if atr_series is not None:
-                    df['ATR'] = atr_series
+                    df["ATR"] = atr_series
                 if adx_df is not None:
                     df = pd.concat([df, adx_df], axis=1)
 
                 # Only drop rows based on missing OHLC data — keep indicator NaNs to avoid dropping datasets
-                df_clean = df.dropna(subset=['Open', 'High', 'Low', 'Close'])
+                df_clean = df.dropna(subset=["Open", "High", "Low", "Close"])
                 if not df_clean.empty:
                     return df_clean
-                    
+
             except Exception as e:
                 self.logger.warning(f"Error fetching {ticker}: {e}")
                 continue
-        
+
         return None
 
     def _fetch_news(self, asset_key: str, ticker: str) -> None:
         """Fetch latest news headline for an asset."""
         try:
             t = yf.Ticker(ticker)
-            if hasattr(t, 'news') and t.news:
-                headline = t.news[0].get('title', '')
+            if hasattr(t, "news") and t.news:
+                headline = t.news[0].get("title", "")
                 if headline:
                     self.news.append(f"{asset_key}: {headline}")
                     self.logger.debug(f"News for {asset_key}: {headline[:50]}...")
@@ -902,13 +912,13 @@ class QuantEngine:
                     # Try using ta if available
                     out = ta.sma(series, length)
                     if out is None:
-                        raise Exception('ta.sma returned None')
+                        raise Exception("ta.sma returned None")
                     if isinstance(out, pd.Series):
                         s = out
                     else:
                         s = pd.Series(out, index=series.index)
                     if len(s) != len(series):
-                        raise Exception('sma length mismatch')
+                        raise Exception("sma length mismatch")
                     return s
                 except Exception:
                     # fallback to pandas rolling mean
@@ -917,15 +927,15 @@ class QuantEngine:
                     except Exception:
                         return None
 
-            if 'SMA_50' in df.columns:
-                sma50 = df['SMA_50']
+            if "SMA_50" in df.columns:
+                sma50 = df["SMA_50"]
             else:
-                sma50 = safe_sma(df['Close'], 50)
-            if 'SMA_200' in df.columns:
-                sma200 = df['SMA_200']
+                sma50 = safe_sma(df["Close"], 50)
+            if "SMA_200" in df.columns:
+                sma200 = df["SMA_200"]
             else:
-                sma200 = safe_sma(df['Close'], 200)
-            
+                sma200 = safe_sma(df["Close"], 200)
+
             # Slice the dataframe to the candle count to plot; additionally slice addplot series to match length
             plot_df = df.tail(self.config.CHART_CANDLE_COUNT)
             apds = []
@@ -935,27 +945,24 @@ class QuantEngine:
                 sma50_plot = sma50.reindex(plot_df.index)
             if sma200 is not None:
                 sma200_plot = sma200.reindex(plot_df.index)
-            if sma50_plot is not None and hasattr(sma50_plot, 'isna') and not sma50_plot.isna().all():
-                apds.append(mpf.make_addplot(sma50_plot, color='orange', width=1))
-            if sma200_plot is not None and hasattr(sma200_plot, 'isna') and not sma200_plot.isna().all():
-                apds.append(mpf.make_addplot(sma200_plot, color='blue', width=1))
-            
-            style = mpf.make_mpf_style(
-                base_mpf_style='nightclouds',
-                rc={'font.size': 8}
-            )
+            if sma50_plot is not None and hasattr(sma50_plot, "isna") and not sma50_plot.isna().all():
+                apds.append(mpf.make_addplot(sma50_plot, color="orange", width=1))
+            if sma200_plot is not None and hasattr(sma200_plot, "isna") and not sma200_plot.isna().all():
+                apds.append(mpf.make_addplot(sma200_plot, color="blue", width=1))
+
+            style = mpf.make_mpf_style(base_mpf_style="nightclouds", rc={"font.size": 8})
             chart_path = os.path.join(self.config.CHARTS_DIR, f"{name}.png")
 
             plot_kwargs = {
-                'type': 'candle',
-                'volume': False,
-                'style': style,
-                'title': f"{name} Quant View",
-                'savefig': chart_path
+                "type": "candle",
+                "volume": False,
+                "style": style,
+                "title": f"{name} Quant View",
+                "savefig": chart_path,
             }
-            
+
             if apds:
-                plot_kwargs['addplot'] = apds
+                plot_kwargs["addplot"] = apds
             mpf.plot(plot_df, **plot_kwargs)
             # ensure chart was actually written
             ok = False
@@ -966,10 +973,12 @@ class QuantEngine:
                 ok = False
 
             if not ok:
-                self.logger.warning(f"Chart generated but verification failed (size too small or missing): {chart_path}")
+                self.logger.warning(
+                    f"Chart generated but verification failed (size too small or missing): {chart_path}"
+                )
             else:
                 self.logger.info(f"Chart generated and verified: {chart_path}")
-            
+
         except Exception as e:
             self.logger.error(f"Error generating chart for {name}: {e}")
 
@@ -977,21 +986,21 @@ class QuantEngine:
         """Remove charts older than configured age."""
         if not os.path.exists(self.config.CHARTS_DIR):
             return
-        
+
         try:
             cutoff = datetime.datetime.now() - datetime.timedelta(days=self.config.MAX_CHART_AGE_DAYS)
-            
+
             for filename in os.listdir(self.config.CHARTS_DIR):
-                if not filename.endswith('.png'):
+                if not filename.endswith(".png"):
                     continue
-                    
+
                 filepath = os.path.join(self.config.CHARTS_DIR, filename)
                 file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
-                
+
                 if file_mtime < cutoff:
                     os.remove(filepath)
                     self.logger.debug(f"Removed old chart: {filename}")
-                    
+
         except Exception as e:
             self.logger.warning(f"Error during chart cleanup: {e}")
 
@@ -1004,7 +1013,7 @@ class Strategist:
     AI-powered market analysis using Google Gemini.
     Generates sophisticated trading insights matching institutional-grade analysis.
     """
-    
+
     def __init__(
         self,
         config: Config,
@@ -1013,7 +1022,7 @@ class Strategist:
         news: List[str],
         memory_log: str,
         model: Optional[Any] = None,
-        cortex: Optional['Cortex'] = None,
+        cortex: Optional["Cortex"] = None,
     ):
         self.config = config
         self.logger = logger
@@ -1026,28 +1035,28 @@ class Strategist:
     def think(self) -> Tuple[str, str]:
         """Generate AI analysis and extract trading bias."""
         self.logger.info("AI Strategist analyzing correlations & volatility...")
-        
-        if 'GOLD' not in self.data:
+
+        if "GOLD" not in self.data:
             self.logger.error("Gold data missing - cannot generate analysis")
             return "Error: Gold data unavailable", "NEUTRAL"
-        
-        gsr = self.data.get('RATIOS', {}).get('GSR', 'N/A')
-        vix_data = self.data.get('VIX', {})
-        vix_price = vix_data.get('price', 'N/A')
-        
+
+        gsr = self.data.get("RATIOS", {}).get("GSR", "N/A")
+        vix_data = self.data.get("VIX", {})
+        vix_price = vix_data.get("price", "N/A")
+
         data_dump = self._format_data_summary()
         prompt = self._build_prompt(gsr, vix_price, data_dump)
-        
+
         try:
             if not self.model:
                 raise RuntimeError("AI model not available")
             response = self.model.generate_content(prompt)
             response_text = response.text
-            
+
             bias = self._extract_bias(response_text)
             self.logger.info(f"AI analysis complete. Bias: {bias}")
             return response_text, bias
-            
+
         except Exception as e:
             self.logger.error(f"AI generation error: {e}", exc_info=True)
             return f"Error generating analysis: {e}", "NEUTRAL"
@@ -1056,41 +1065,41 @@ class Strategist:
         """Format asset data for AI prompt."""
         lines = []
         for key, values in self.data.items():
-            if key == 'RATIOS':
+            if key == "RATIOS":
                 continue
             if not isinstance(values, dict):
                 continue
-            
-            price = values.get('price', 'N/A')
-            change = values.get('change', 0)
-            rsi = values.get('rsi', 'N/A')
-            adx = values.get('adx', 'N/A')
-            regime = values.get('regime', 'N/A')
-            atr = values.get('atr', 'N/A')
-            sma200 = values.get('sma200', 'N/A')
-            
+
+            price = values.get("price", "N/A")
+            change = values.get("change", 0)
+            rsi = values.get("rsi", "N/A")
+            adx = values.get("adx", "N/A")
+            regime = values.get("regime", "N/A")
+            atr = values.get("atr", "N/A")
+            sma200 = values.get("sma200", "N/A")
+
             trend_vs_sma = ""
-            if price != 'N/A' and sma200 and sma200 != 'N/A':
+            if price != "N/A" and sma200 and sma200 != "N/A":
                 if price > sma200:
                     trend_vs_sma = "ABOVE 200SMA"
                 else:
                     trend_vs_sma = "BELOW 200SMA"
-            
+
             lines.append(
                 f"* {key}: ${price} ({change:+.2f}%) | RSI: {rsi} | ADX: {adx} ({regime}) | ATR: ${atr} | {trend_vs_sma}"
             )
-        
+
         return "\n".join(lines)
 
     def _get_active_trades_context(self) -> str:
         """Format active trades for AI context."""
         if not self.cortex:
             return "No active positions."
-        
+
         trades = self.cortex.get_active_trades()
         if not trades:
             return "No active positions."
-        
+
         lines = ["Current Active Positions:"]
         for t in trades:
             lines.append(
@@ -1102,23 +1111,23 @@ class Strategist:
 
     def _build_prompt(self, gsr: Any, vix_price: Any, data_dump: str) -> str:
         """Build sophisticated AI analysis prompt matching institutional style."""
-        gold_data = self.data.get('GOLD', {})
-        gold_price = gold_data.get('price', 0)
-        gold_atr = gold_data.get('atr', 0) or 0
-        gold_rsi = gold_data.get('rsi', 50)
-        gold_adx = gold_data.get('adx', 0)
-        
+        gold_data = self.data.get("GOLD", {})
+        gold_price = gold_data.get("price", 0)
+        gold_atr = gold_data.get("atr", 0) or 0
+        gold_rsi = gold_data.get("rsi", 50)
+        gold_adx = gold_data.get("adx", 0)
+
         atr_stop_width = float(gold_atr) * 2
         suggested_sl = gold_price - atr_stop_width if gold_price else 0
         suggested_tp1 = gold_price + (atr_stop_width * 1.5) if gold_price else 0
         suggested_tp2 = gold_price + (atr_stop_width * 3) if gold_price else 0
-        
+
         # Determine regime
         regime = "TRENDING" if gold_adx and gold_adx > self.config.ADX_TREND_THRESHOLD else "RANGE-BOUND/CHOPPY"
-        
+
         # Get active trades context
         trades_context = self._get_active_trades_context()
-        
+
         return f"""
 You are "Gold Standard" - an elite quantitative trading algorithm operating for a sophisticated hedge fund.
 Your analysis must be precise, actionable, and reflect deep market understanding.
@@ -1217,14 +1226,14 @@ Entry Conditions:
     def _extract_bias(self, text: str) -> str:
         """Extract trading bias from AI response using robust parsing."""
         text_upper = text.upper()
-        
+
         bias_patterns = [
-            r'\*\*BIAS[:\*\s]*\*?\*?\s*\*?\*?(BULLISH|BEARISH|NEUTRAL)',
-            r'BIAS[:\s]+\*?\*?(BULLISH|BEARISH|NEUTRAL)',
-            r'\*\*(BULLISH|BEARISH|NEUTRAL)\*\*',
-            r'DIRECTION[:\s]+(LONG|SHORT|FLAT)',
+            r"\*\*BIAS[:\*\s]*\*?\*?\s*\*?\*?(BULLISH|BEARISH|NEUTRAL)",
+            r"BIAS[:\s]+\*?\*?(BULLISH|BEARISH|NEUTRAL)",
+            r"\*\*(BULLISH|BEARISH|NEUTRAL)\*\*",
+            r"DIRECTION[:\s]+(LONG|SHORT|FLAT)",
         ]
-        
+
         for pattern in bias_patterns:
             match = re.search(pattern, text_upper)
             if match:
@@ -1236,23 +1245,25 @@ Entry Conditions:
                 elif result == "FLAT":
                     return "NEUTRAL"
                 return result
-        
+
         bullish_count = text_upper.count("BULLISH") + text_upper.count("LONG")
         bearish_count = text_upper.count("BEARISH") + text_upper.count("SHORT")
         neutral_count = text_upper.count("NEUTRAL") + text_upper.count("FLAT")
-        
+
         if bullish_count > bearish_count and bullish_count > neutral_count:
             return "BULLISH"
         elif bearish_count > bullish_count and bearish_count > neutral_count:
             return "BEARISH"
-        
+
         return "NEUTRAL"
 
 
 # ==========================================
 # EXECUTION LOOP
 # ==========================================
-def execute(config: Config, logger: logging.Logger, model: Optional[Any] = None, dry_run: bool = False, no_ai: bool = False) -> bool:
+def execute(
+    config: Config, logger: logging.Logger, model: Optional[Any] = None, dry_run: bool = False, no_ai: bool = False
+) -> bool:
     """
     Execute one analysis cycle.
     Returns True on success, False on failure.
@@ -1260,36 +1271,36 @@ def execute(config: Config, logger: logging.Logger, model: Optional[Any] = None,
     logger.info("=" * 50)
     logger.info("QUANT CYCLE INITIATED")
     logger.info("=" * 50)
-    
+
     # Ensure output directory exists
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
-    
+
     # Initialize components
     cortex = Cortex(config, logger)
     quant = QuantEngine(config, logger)
-    
+
     # 1. Get Market Data
     data = quant.get_data()
     if not data:
         logger.error("Data fetch failed - aborting cycle")
         return False
-    
+
     # Validate gold data exists
-    if 'GOLD' not in data:
+    if "GOLD" not in data:
         logger.error("Gold data missing - aborting cycle")
         return False
-    
-    gold_price = data['GOLD']['price']
-    
+
+    gold_price = data["GOLD"]["price"]
+
     # 2. Grade Past Performance
     last_result = cortex.grade_performance(gold_price)
     logger.info(f"[MEMORY] Last Run Result: {last_result}")
-    
+
     # 3. Update active trades with current prices
-    triggered = cortex.update_trade_prices({'GOLD': gold_price})
+    triggered = cortex.update_trade_prices({"GOLD": gold_price})
     for trade in triggered:
         logger.info(f"[TRADE] Auto-closed: #{trade['id']} - {trade.get('exit_reason', 'TRIGGERED')}")
-        cortex.close_trade(trade['id'], gold_price, trade.get('exit_reason', 'AUTO'))
+        cortex.close_trade(trade["id"], gold_price, trade.get("exit_reason", "AUTO"))
 
     # 4. AI Analysis
     memory_context = cortex.get_formatted_history()
@@ -1303,13 +1314,13 @@ def execute(config: Config, logger: logging.Logger, model: Optional[Any] = None,
     else:
         strat = Strategist(config, logger, data, quant.news, memory_context, model=model, cortex=cortex)
         report, new_bias = strat.think()
-    
+
     # 5. Save Bias to Memory (unless dry-run)
     if not dry_run:
         cortex.update_memory(new_bias, gold_price)
     else:
         logger.info("Dry-run mode: memory not updated")
-    
+
     # Remove any existing today's journal so a fresh one can be created
     try:
         fname = os.path.join(config.OUTPUT_DIR, f"Journal_{datetime.date.today()}.md")
@@ -1322,7 +1333,7 @@ def execute(config: Config, logger: logging.Logger, model: Optional[Any] = None,
     # 6. Write Report
     report_filename = f"Journal_{datetime.date.today()}.md"
     report_path = os.path.join(config.OUTPUT_DIR, report_filename)
-    
+
     if dry_run:
         logger.info(f"Dry-run mode: skipping report write to {report_path}")
         return True
@@ -1330,28 +1341,29 @@ def execute(config: Config, logger: logging.Logger, model: Optional[Any] = None,
     try:
         # Clean non-ASCII / emoji characters from report before saving
         safe_report = strip_emojis(report)
-        
+
         # Note: Frontmatter is applied as the FINAL step in run.py after all
         # file organization is complete. Do not add frontmatter here.
-        
-        with open(report_path, 'w', encoding='utf-8') as f:
+
+        with open(report_path, "w", encoding="utf-8") as f:
             f.write(safe_report)
             f.write("\n\n---\n\n## Charts\n\n")
             f.write("![Gold](charts/GOLD.png)\n\n")
             f.write("![Silver](charts/SILVER.png)\n\n")
             f.write("![VIX](charts/VIX.png)\n")
-        
+
         logger.info(f"Report generated: {report_path}")
-        
+
         # Save to database for organized storage
         try:
-            from db_manager import get_db, JournalEntry
+            from db_manager import JournalEntry, get_db
+
             db = get_db()
-            
+
             # Get silver price and GSR for database
-            silver_price = data.get('SILVER', {}).get('price', 0)
+            silver_price = data.get("SILVER", {}).get("price", 0)
             gsr = gold_price / silver_price if silver_price > 0 else 0
-            
+
             entry = JournalEntry(
                 date=str(datetime.date.today()),
                 content=safe_report,
@@ -1359,7 +1371,7 @@ def execute(config: Config, logger: logging.Logger, model: Optional[Any] = None,
                 gold_price=gold_price,
                 silver_price=silver_price,
                 gsr=gsr,
-                ai_enabled=not no_ai
+                ai_enabled=not no_ai,
             )
             db.save_journal(entry, overwrite=True)
             logger.info(f"[DATABASE] Journal saved for {datetime.date.today()}")
@@ -1367,31 +1379,30 @@ def execute(config: Config, logger: logging.Logger, model: Optional[Any] = None,
             logger.debug("Database module not available, skipping DB save")
         except Exception as db_err:
             logger.warning(f"Failed to save to database: {db_err}")
-        
+
         # Run live analysis if AI enabled (catalysts, institutional matrix, horizon reports)
         if not no_ai and model:
             try:
                 from scripts.live_analysis import LiveAnalyzer
+
                 analyzer = LiveAnalyzer(config, logger, model)
                 logger.info("[LIVE] Running live analysis suite...")
-                
+
                 # Generate all live reports
                 reports_generated = analyzer.run_full_analysis(
-                    gold_price=gold_price,
-                    silver_price=data.get('SILVER', {}).get('price', 0),
-                    current_bias=new_bias
+                    gold_price=gold_price, silver_price=data.get("SILVER", {}).get("price", 0), current_bias=new_bias
                 )
-                
+
                 for report_name, report_path in reports_generated.items():
                     logger.info(f"[LIVE] Generated: {report_name} -> {report_path}")
-                    
+
             except ImportError as ie:
                 logger.debug(f"Live analysis module not available: {ie}")
             except Exception as la_err:
                 logger.warning(f"Live analysis failed: {la_err}")
-        
+
         return True
-        
+
     except Exception as e:
         logger.error(f"Error writing report: {e}", exc_info=True)
         return False
@@ -1403,31 +1414,31 @@ def main() -> None:
 
     # Load environment from .env (optional)
     load_dotenv()
-    
+
     # Parse CLI arguments
     parser = argparse.ArgumentParser(description="Gold Standard Quant Analysis")
-    parser.add_argument('--once', action='store_true', help='Run one cycle and exit')
-    parser.add_argument('--dry-run', action='store_true', help='Run without writing memory/report')
-    parser.add_argument('--no-ai', action='store_true', help='Do not call AI, produce a skeleton report')
-    parser.add_argument('--interval', type=int, default=None, help='Override run interval hours')
-    parser.add_argument('--log-level', default='INFO', help='Logging level (DEBUG, INFO, WARNING, ERROR)')
-    parser.add_argument('--gemini-key', default=None, help='Override GEMINI API key via CLI (not recommended)')
+    parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
+    parser.add_argument("--dry-run", action="store_true", help="Run without writing memory/report")
+    parser.add_argument("--no-ai", action="store_true", help="Do not call AI, produce a skeleton report")
+    parser.add_argument("--interval", type=int, default=None, help="Override run interval hours")
+    parser.add_argument("--log-level", default="INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR)")
+    parser.add_argument("--gemini-key", default=None, help="Override GEMINI API key via CLI (not recommended)")
     # Production mode: the tool uses the configured ASSETS in the source code
     args = parser.parse_args()
 
     # Initialize colorama
     init(autoreset=True)
-    
+
     # Load configuration
     config = Config()
     if args.interval:
         config.RUN_INTERVAL_HOURS = args.interval
-    
+
     # Setup logging
     logger = setup_logging(config)
     # Adjust log level from CLI
     logger.setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
-    
+
     # Validate API key unless --no-ai is set
     if not args.no_ai:
         if args.gemini_key:
@@ -1437,7 +1448,7 @@ def main() -> None:
             logger.error("Please set GEMINI_API_KEY environment variable or provide --gemini-key.")
             logger.warning("Example: $env:GEMINI_API_KEY = 'your-api-key-here' or use --gemini-key option")
             sys.exit(1)
-    
+
     # Configure Gemini (unless --no-ai)
     model_obj = None
     if not args.no_ai:
@@ -1448,15 +1459,15 @@ def main() -> None:
         except Exception as e:
             logger.error(f"Failed to configure Gemini AI: {e}")
             sys.exit(1)
-    
+
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     logger.info("GOLD STANDARD SYSTEM ONLINE")
     logger.info(f"Run interval: {config.RUN_INTERVAL_HOURS} hours")
     logger.info("Press Ctrl+C to shutdown gracefully")
-    
+
     # Execute immediately
     execute(config, logger, model=model_obj, dry_run=args.dry_run, no_ai=args.no_ai)
 
@@ -1467,7 +1478,7 @@ def main() -> None:
 
     # Schedule recurring execution
     schedule.every(config.RUN_INTERVAL_HOURS).hours.do(execute, config, logger, model_obj, args.dry_run, args.no_ai)
-    
+
     # Main loop with graceful shutdown
     while not shutdown_requested:
         try:
@@ -1476,7 +1487,7 @@ def main() -> None:
         except Exception as e:
             logger.error(f"Error in main loop: {e}")
             time.sleep(5)
-    
+
     logger.info("Graceful shutdown complete")
 
 

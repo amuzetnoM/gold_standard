@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # ══════════════════════════════════════════════════════════════════════════════
-#  _________._____________.___ ____ ___  _________      .__         .__            
-# /   _____/|   \______   \   |    |   \/   _____/____  |  | ______ |  |__ _____   
-# \_____  \ |   ||       _/   |    |   /\_____  \__  \ |  | \____ \|  |  \__  \  
+#  _________._____________.___ ____ ___  _________      .__         .__
+# /   _____/|   \______   \   |    |   \/   _____/____  |  | ______ |  |__ _____
+# \_____  \ |   ||       _/   |    |   /\_____  \__  \ |  | \____ \|  |  \__  \
 # /        \|   ||    |   \   |    |  / /        \/ __ \|  |_|  |_> >   Y  \/ __ \_
 # /_______  /|___||____|_  /___|______/ /_______  (____  /____/   __/|___|  (____  /
-#         \/             \/                     \/     \/     |__|        \/     \/ 
+#         \/             \/                     \/     \/     |__|        \/     \/
 #
 # Gold Standard - Precious Metals Intelligence System
 # Copyright (c) 2025 SIRIUS Alpha
@@ -19,13 +19,14 @@ Usage:
   python scripts/init_cortex.py
 
 """
-import os
+
 import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE = ROOT / "cortex_memory.template.json"
 TARGET = ROOT / "cortex_memory.json"
+
 
 def init_cortex(force: bool = False):
     if TARGET.exists() and not force:
@@ -38,8 +39,10 @@ def init_cortex(force: bool = False):
     print(f"Copied template {TEMPLATE.name} -> {TARGET.name}")
     return 0
 
+
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true", help="Overwrite existing cortex file if present")
     args = parser.parse_args()

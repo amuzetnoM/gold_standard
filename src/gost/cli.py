@@ -1,10 +1,10 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  _________._____________.___ ____ ___  _________      .__         .__            
-# /   _____/|   \______   \   |    |   \/   _____/____  |  | ______ |  |__ _____   
-# \_____  \ |   ||       _/   |    |   /\_____  \__  \ |  | \____ \|  |  \__  \  
+#  _________._____________.___ ____ ___  _________      .__         .__
+# /   _____/|   \______   \   |    |   \/   _____/____  |  | ______ |  |__ _____
+# \_____  \ |   ||       _/   |    |   /\_____  \__  \ |  | \____ \|  |  \__  \
 # /        \|   ||    |   \   |    |  / /        \/ __ \|  |_|  |_> >   Y  \/ __ \_
 # /_______  /|___||____|_  /___|______/ /_______  (____  /____/   __/|___|  (____  /
-#         \/             \/                     \/     \/     |__|        \/     \/ 
+#         \/             \/                     \/     \/     |__|        \/     \/
 #
 # Gold Standard - Precious Metals Intelligence System
 # Copyright (c) 2025 SIRIUS Alpha
@@ -14,12 +14,11 @@
 Gold Standard CLI - Command-line interface for the autonomous analysis system.
 """
 
-import os
-import sys
 import argparse
+import os
 import signal
 import time
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 # Add package root to path for imports
@@ -28,15 +27,15 @@ PROJECT_ROOT = PACKAGE_ROOT.parent.parent.parent  # src/gost -> gold_standard
 
 # Banner
 BANNER = r"""
-   _________ _________ _________ _________ ____ ____ ____ ____ 
+   _________ _________ _________ _________ ____ ____ ____ ____
   ||       |||       |||       |||       |||G |||O |||L |||D ||
   ||_______|||_______|||_______|||_______|||__|||__|||__|||__||
   |/_______\|/_______\|/_______\|/_______\|/__\|/__\|/__\|/__\|
-   _________ ____ ____ ____ ____ ____ ____ ____ ____           
-  ||       |||S |||T |||A |||N |||D |||A |||R |||D ||          
-  ||_______|||__|||__|||__|||__|||__|||__|||__|||__||          
-  |/_______\|/__\|/__\|/__\|/__\|/__\|/__\|/__\|/__\|          
- 
+   _________ ____ ____ ____ ____ ____ ____ ____ ____
+  ||       |||S |||T |||A |||N |||D |||A |||R |||D ||
+  ||_______|||__|||__|||__|||__|||__|||__|||__|||__||
+  |/_______\|/__\|/__\|/__\|/__\|/__\|/__\|/__\|/__\|
+
             PRECIOUS METALS INTELLIGENCE COMPLEX
 """
 
@@ -59,7 +58,7 @@ def print_banner():
 def get_project_root():
     """Get the project root directory, handling both dev and installed modes."""
     # Check if running from installed package
-    if 'site-packages' in str(PACKAGE_ROOT):
+    if "site-packages" in str(PACKAGE_ROOT):
         # Installed via pip - use current working directory
         return Path.cwd()
     else:
@@ -70,13 +69,13 @@ def get_project_root():
 def ensure_project_setup():
     """Ensure project directories and files exist."""
     root = get_project_root()
-    
+
     # Required directories
     (root / "output").mkdir(exist_ok=True)
     (root / "output" / "reports").mkdir(exist_ok=True)
     (root / "output" / "charts").mkdir(exist_ok=True)
     (root / "data").mkdir(exist_ok=True)
-    
+
     # Check for .env file
     env_file = root / ".env"
     if not env_file.exists():
@@ -85,23 +84,23 @@ def ensure_project_setup():
             print("[SETUP] No .env file found. Please copy .env.template to .env and add your API keys.")
         else:
             print("[SETUP] No .env file found. Please create one with GEMINI_API_KEY=your_key")
-    
+
     return root
 
 
 def run_analysis(mode: str = "all", no_ai: bool = False, force: bool = False):
     """
     Run Gold Standard analysis.
-    
+
     Args:
         mode: Analysis mode ('all', 'daily', 'premarket', 'weekly', 'monthly', 'yearly')
         no_ai: Disable AI-generated content
         force: Force regenerate even if reports exist
     """
     from gost.core import GoldStandard
-    
+
     gs = GoldStandard(no_ai=no_ai)
-    
+
     if mode == "all":
         return gs.run_all(force=force)
     elif mode == "daily":
@@ -122,20 +121,21 @@ def run_analysis(mode: str = "all", no_ai: bool = False, force: bool = False):
 def run_daemon(no_ai: bool = False, interval_minutes: int = 1):
     """
     Run Gold Standard as an autonomous daemon.
-    
+
     Args:
         no_ai: Disable AI-generated content
         interval_minutes: Minutes between analysis runs
     """
     global _shutdown_requested
-    
+
     import schedule
+
     from gost.core import GoldStandard
-    
+
     # Register signal handlers
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
-    
+
     print("\n" + "=" * 60)
     print("       GOLD STANDARD - AUTONOMOUS MODE")
     print("=" * 60)
@@ -143,23 +143,23 @@ def run_daemon(no_ai: bool = False, interval_minutes: int = 1):
     print(f"  AI Mode:  {'Disabled' if no_ai else 'Enabled'}")
     print("  Press Ctrl+C to shutdown gracefully")
     print("=" * 60 + "\n")
-    
+
     gs = GoldStandard(no_ai=no_ai)
-    
+
     # Run immediately on startup
     print("[DAEMON] Running initial analysis cycle...\n")
     gs.run_all()
-    
+
     # Schedule recurring runs
     def daemon_cycle():
         print(f"\n[DAEMON] Starting cycle at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         gs.run_all()
-    
+
     schedule.every(interval_minutes).minutes.do(daemon_cycle)
-    
+
     print(f"\n[DAEMON] Next run scheduled in {interval_minutes} minute(s)")
     print("[DAEMON] System is now running autonomously...\n")
-    
+
     # Main loop
     while not _shutdown_requested:
         try:
@@ -168,14 +168,14 @@ def run_daemon(no_ai: bool = False, interval_minutes: int = 1):
         except Exception as e:
             print(f"[DAEMON] Error in main loop: {e}")
             time.sleep(5)
-    
+
     print("\n[DAEMON] Shutdown complete. Goodbye!\n")
 
 
 def show_status():
     """Show current system status."""
     from gost.core import GoldStandard
-    
+
     gs = GoldStandard()
     gs.print_status()
 
@@ -183,7 +183,7 @@ def show_status():
 def interactive_mode(no_ai: bool = False):
     """Run interactive menu mode."""
     from gost.core import GoldStandard
-    
+
     MENU = """
 ┌─────────────────────────────────────────────────────────────┐
 │                    GOLD STANDARD                            │
@@ -199,20 +199,20 @@ def interactive_mode(no_ai: bool = False):
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 """
-    
+
     gs = GoldStandard(no_ai=no_ai)
-    
+
     while True:
-        os.system('cls' if os.name == 'nt' else 'clear')
+        os.system("cls" if os.name == "nt" else "clear")
         print_banner()
         gs.print_status()
         print(MENU)
-        
+
         if no_ai:
             print("  [AI Disabled - running in --no-ai mode]\n")
-        
+
         choice = input("  Enter choice [0-5]: ").strip()
-        
+
         if choice == "1":
             gs.run_all()
             input("\n  Press Enter to continue...")
@@ -224,7 +224,7 @@ def interactive_mode(no_ai: bool = False):
             input("\n  Press Enter to continue...")
         elif choice == "4":
             confirm = input("\n  Regenerate ALL reports? [y/N]: ").strip().lower()
-            if confirm == 'y':
+            if confirm == "y":
                 gs.run_all(force=True)
             input("\n  Press Enter to continue...")
         elif choice == "5":
@@ -251,76 +251,68 @@ Examples:
   gost --status            # Show current status
   gost --no-ai             # Daemon without AI
   gost --init              # Initialize project in current directory
-        """
+        """,
     )
-    
-    parser.add_argument('--version', '-V', action='version', version='%(prog)s 3.1.0')
-    parser.add_argument('--run', '-r', action='store_true',
-                       help='Run complete analysis once')
-    parser.add_argument('--daily', '-d', action='store_true',
-                       help='Quick daily journal update only')
-    parser.add_argument('--premarket', '-p', action='store_true',
-                       help='Generate pre-market plan')
-    parser.add_argument('--force', '-f', action='store_true',
-                       help='Force regenerate reports even if they exist')
-    parser.add_argument('--status', '-s', action='store_true',
-                       help='Show current system status')
-    parser.add_argument('--no-ai', action='store_true',
-                       help='Disable AI-generated content (Gemini)')
-    parser.add_argument('--interactive', '-i', action='store_true',
-                       help='Interactive menu mode')
-    parser.add_argument('--once', action='store_true',
-                       help='Run once and exit (no daemon)')
-    parser.add_argument('--interval-min', type=int, default=1,
-                       help='Minutes between daemon runs (default: 1)')
-    parser.add_argument('--init', action='store_true',
-                       help='Initialize Gold Standard in current directory')
-    
+
+    parser.add_argument("--version", "-V", action="version", version="%(prog)s 3.1.0")
+    parser.add_argument("--run", "-r", action="store_true", help="Run complete analysis once")
+    parser.add_argument("--daily", "-d", action="store_true", help="Quick daily journal update only")
+    parser.add_argument("--premarket", "-p", action="store_true", help="Generate pre-market plan")
+    parser.add_argument("--force", "-f", action="store_true", help="Force regenerate reports even if they exist")
+    parser.add_argument("--status", "-s", action="store_true", help="Show current system status")
+    parser.add_argument("--no-ai", action="store_true", help="Disable AI-generated content (Gemini)")
+    parser.add_argument("--interactive", "-i", action="store_true", help="Interactive menu mode")
+    parser.add_argument("--once", action="store_true", help="Run once and exit (no daemon)")
+    parser.add_argument("--interval-min", type=int, default=1, help="Minutes between daemon runs (default: 1)")
+    parser.add_argument("--init", action="store_true", help="Initialize Gold Standard in current directory")
+
     args = parser.parse_args()
-    
+
     # Initialize project structure
     if args.init:
         from gost.init import initialize_project
+
         initialize_project()
         return
-    
+
     # Ensure project is set up
     project_root = ensure_project_setup()
     os.chdir(project_root)
-    
+
     # Load environment
     from dotenv import load_dotenv
+
     load_dotenv()
-    
+
     # Handle commands
     if args.status:
         print_banner()
         show_status()
         return
-    
+
     if args.run or args.once:
         print_banner()
         run_analysis("all", no_ai=args.no_ai, force=args.force)
         return
-    
+
     if args.daily:
         print_banner()
         run_analysis("daily", no_ai=args.no_ai)
         return
-    
+
     if args.premarket:
         print_banner()
         run_analysis("premarket", no_ai=args.no_ai)
         return
-    
+
     if args.interactive:
         interactive_mode(no_ai=args.no_ai)
         return
-    
+
     # Default: Autonomous daemon mode
     print_banner()
     run_daemon(no_ai=args.no_ai, interval_minutes=args.interval_min)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
