@@ -1,10 +1,10 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  _________._____________.___ ____ ___  _________      .__         .__            
-# /   _____/|   \______   \   |    |   \/   _____/____  |  | ______ |  |__ _____   
-# \_____  \ |   ||       _/   |    |   /\_____  \__  \ |  | \____ \|  |  \__  \  
+#  _________._____________.___ ____ ___  _________      .__         .__
+# /   _____/|   \______   \   |    |   \/   _____/____  |  | ______ |  |__ _____
+# \_____  \ |   ||       _/   |    |   /\_____  \__  \ |  | \____ \|  |  \__  \
 # /        \|   ||    |   \   |    |  / /        \/ __ \|  |_|  |_> >   Y  \/ __ \_
 # /_______  /|___||____|_  /___|______/ /_______  (____  /____/   __/|___|  (____  /
-#         \/             \/                     \/     \/     |__|        \/     \/ 
+#         \/             \/                     \/     \/     |__|        \/     \/
 #
 # Gold Standard - Precious Metals Intelligence System
 # Copyright (c) 2025 SIRIUS Alpha
@@ -50,7 +50,7 @@ LABEL org.opencontainers.image.description="Gold Standard - Autonomous Precious 
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.title="Gold Standard"
 LABEL org.opencontainers.image.vendor="SIRIUS Alpha"
-LABEL org.opencontainers.image.version="3.2.1"
+LABEL org.opencontainers.image.version="3.3.0"
 
 # Security: Run as non-root user
 RUN groupadd -r goldstandard && useradd -r -g goldstandard goldstandard
