@@ -296,6 +296,7 @@ def generate_frontmatter(
     title: Optional[str] = None,
     custom_fields: Optional[Dict[str, Any]] = None,
     status: str = "draft",
+    ai_processed: bool = False,
 ) -> str:
     """
     Generate YAML frontmatter for a markdown file.
@@ -308,6 +309,7 @@ def generate_frontmatter(
         title: Override title extraction
         custom_fields: Additional frontmatter fields
         status: Document lifecycle status (draft/in_progress/published)
+        ai_processed: Whether AI successfully processed this document
 
     Returns:
         YAML frontmatter string (including --- delimiters)
@@ -349,6 +351,7 @@ def generate_frontmatter(
     lines.append(f'title: "{title}"')
     lines.append(f"date: {doc_date}")
     lines.append(f"status: {status}")
+    lines.append(f"ai_processed: {str(ai_processed).lower()}")
     lines.append(f"generated: {datetime.now().isoformat()}")
 
     if tags:
@@ -505,9 +508,121 @@ def is_published(content: str) -> bool:
     return get_document_status(content) == "published"
 
 
+def is_ai_processed(content: str) -> bool:
+    """Check if document was processed by AI."""
+    frontmatter, _ = parse_frontmatter(content)
+    return frontmatter.get("ai_processed", False) is True
+
+
+def is_ready_for_sync(content: str) -> bool:
+    """
+    Check if document is ready for Notion sync.
+
+    A document is ready for sync if:
+    - status is 'published', OR
+    - status is 'in_progress' AND ai_processed is True
+    """
+    frontmatter, _ = parse_frontmatter(content)
+    status = frontmatter.get("status", "draft")
+    ai_processed = frontmatter.get("ai_processed", False)
+
+    if status == "published":
+        return True
+    if status == "in_progress" and ai_processed:
+        return True
+    return False
+
+
 def is_draft(content: str) -> bool:
-    """Check if document is in draft status."""
-    return get_document_status(content) in ("draft", "in_progress")
+    """Check if document is in draft status (not AI processed)."""
+    frontmatter, _ = parse_frontmatter(content)
+    status = frontmatter.get("status", "draft")
+    return status == "draft"
+
+
+def mark_ai_pending(content: str, filename: str, reason: str = "quota") -> str:
+    """
+    Mark a document as pending AI processing (e.g., due to quota limits).
+
+    This keeps the document in draft status with a pending_reason field,
+    so it can be retried later when quota is available.
+
+    Args:
+        content: Document content
+        filename: Filename for frontmatter regeneration
+        reason: Why AI processing is pending (quota, error, etc.)
+
+    Returns:
+        Updated content with pending status
+    """
+    frontmatter, body = parse_frontmatter(content)
+
+    if frontmatter:
+        frontmatter["status"] = "draft"
+        frontmatter["ai_processed"] = False
+        frontmatter["pending_reason"] = reason
+        frontmatter["pending_since"] = datetime.now().isoformat()
+
+        # Rebuild frontmatter string
+        lines = ["---"]
+        for key, value in frontmatter.items():
+            if isinstance(value, list):
+                lines.append(f"{key}: [{', '.join(str(v) for v in value)}]")
+            elif isinstance(value, str) and " " in value:
+                lines.append(f'{key}: "{value}"')
+            elif isinstance(value, bool):
+                lines.append(f"{key}: {str(value).lower()}")
+            else:
+                lines.append(f"{key}: {value}")
+        lines.append("---")
+        lines.append("")
+        return "\n".join(lines) + body
+    else:
+        # No frontmatter, add it
+        return add_frontmatter(
+            content,
+            filename,
+            status="draft",
+            ai_processed=False,
+            custom_fields={"pending_reason": reason, "pending_since": datetime.now().isoformat()},
+        )
+
+
+def get_pending_documents(directory: str) -> list:
+    """
+    Find all documents that are pending AI processing.
+
+    Args:
+        directory: Directory to search for markdown files
+
+    Returns:
+        List of file paths that need AI processing
+    """
+    from pathlib import Path
+
+    pending = []
+    for md_file in Path(directory).glob("**/*.md"):
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            frontmatter, _ = parse_frontmatter(content)
+
+            status = frontmatter.get("status", "draft")
+            ai_processed = frontmatter.get("ai_processed", False)
+            pending_reason = frontmatter.get("pending_reason")
+
+            # Document needs AI if it's draft and not processed, or has a pending reason
+            if status == "draft" and (not ai_processed or pending_reason):
+                pending.append(
+                    {
+                        "path": str(md_file),
+                        "reason": pending_reason or "not_processed",
+                        "since": frontmatter.get("pending_since"),
+                    }
+                )
+        except Exception:
+            continue
+
+    return pending
 
 
 def promote_status(content: str, filename: str = "document.md") -> str:

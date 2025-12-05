@@ -636,10 +636,39 @@ def _run_post_analysis_tasks():
                     if has_frontmatter(content):
                         continue
 
-                    # Add frontmatter based on filename
-                    updated = add_frontmatter(content, md_file.name)
+                    # Detect if AI was used by checking content patterns
+                    # AI-generated content typically has these markers
+                    ai_markers = [
+                        "## AI ",
+                        "## Strategic",
+                        "## Tactical",
+                        "**Bias:**",
+                        "**Entry Zone",
+                        "## Market Intelligence",
+                        "## Outlook",
+                    ]
+                    ai_processed = any(marker in content for marker in ai_markers)
+
+                    # Also check for NO AI markers
+                    no_ai_markers = ["[NO AI MODE]", "AI disabled", "no AI", "skeleton report"]
+                    if any(marker.lower() in content.lower() for marker in no_ai_markers):
+                        ai_processed = False
+
+                    # Set status: in_progress if AI processed, draft if not
+                    status = "in_progress" if ai_processed else "draft"
+
+                    # Add frontmatter based on filename with proper status
+                    updated = add_frontmatter(content, md_file.name, status=status, ai_processed=ai_processed)
                     md_file.write_text(updated, encoding="utf-8")
                     frontmatter_count += 1
+
+                    # Register in lifecycle database
+                    try:
+                        doc_type = "journal" if "Journal_" in md_file.name else "reports"
+                        db.register_document(str(md_file), doc_type, status=status)
+                    except Exception:
+                        pass  # DB registration is optional
+
                 except Exception as fm_err:
                     logger.debug(f"Frontmatter failed for {md_file.name}: {fm_err}")
 

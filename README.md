@@ -94,6 +94,10 @@ A comprehensive end-to-end system combining real-time market data, technical ind
 
 ---
 
+> 2d
+
+---
+
 ## Quick Start
 
 ### Requirements
@@ -662,6 +666,10 @@ When running `--sync-all`, the publisher automatically skips non-published docum
 [DOC] Journal_2025-12-05.md - Skipped (status: draft)
 [DOC] Journal_2025-12-04.md - Published to Notion
 ```
+
+---
+
+> 3D
 
 ---
 

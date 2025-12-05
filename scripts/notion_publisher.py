@@ -533,20 +533,28 @@ class NotionPublisher:
         content = path.read_text(encoding="utf-8")
         filename = path.name
 
-        # Check document lifecycle status - only sync published documents
+        # Check document lifecycle status - only sync ready documents
+        # Ready = published OR (in_progress AND ai_processed)
         if not force:
             try:
-                from scripts.frontmatter import get_document_status, is_published
+                from scripts.frontmatter import get_document_status, is_ai_processed, is_ready_for_sync
 
                 status = get_document_status(content)
-                if not is_published(content):
+                ai_processed = is_ai_processed(content)
+
+                if not is_ready_for_sync(content):
+                    reason = f"Document status is '{status}'"
+                    if status == "draft":
+                        reason += " (AI processing incomplete or failed)"
+                    elif not ai_processed:
+                        reason += " (not AI processed)"
                     return {
                         "page_id": "",
                         "url": "",
                         "type": doc_type or "notes",
                         "tags": [],
                         "skipped": True,
-                        "reason": f"Document status is '{status}' (not published)",
+                        "reason": reason,
                     }
             except ImportError:
                 pass  # Frontmatter module not available, continue with sync

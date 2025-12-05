@@ -1375,6 +1375,18 @@ def execute(
             )
             db.save_journal(entry, overwrite=True)
             logger.info(f"[DATABASE] Journal saved for {datetime.date.today()}")
+
+            # Register document in lifecycle system
+            # Status is 'in_progress' if AI processed, 'draft' if no-AI mode
+            lifecycle_status = "in_progress" if not no_ai else "draft"
+            db.register_document(
+                report_path,
+                doc_type="journal",
+                status=lifecycle_status,
+                content_hash=db.get_file_hash(report_path) if hasattr(db, "get_file_hash") else None,
+            )
+            logger.debug(f"[LIFECYCLE] Registered journal with status: {lifecycle_status}")
+
         except ImportError:
             logger.debug("Database module not available, skipping DB save")
         except Exception as db_err:

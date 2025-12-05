@@ -39,10 +39,22 @@ def ensure_dirs(config: Config):
     return reports, charts
 
 
-def write_report(report_path: str, markdown: str, doc_type: str = "reports"):
-    """Write report to file. Frontmatter is applied in final pass by run.py."""
+def write_report(report_path: str, markdown: str, doc_type: str = "reports", ai_processed: bool = False):
+    """Write report to file and register in lifecycle system. Frontmatter is applied in final pass by run.py."""
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(markdown)
+
+    # Register in lifecycle database
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from db_manager import get_db
+
+        db = get_db()
+        # Status is 'in_progress' if AI processed, 'draft' if no-AI mode
+        lifecycle_status = "in_progress" if ai_processed else "draft"
+        db.register_document(report_path, doc_type=doc_type, status=lifecycle_status)
+    except Exception:
+        pass  # Lifecycle registration is optional
 
 
 def monthly_yearly_report(config: Config, logger, model=None, dry_run=False, no_ai=False) -> str:
@@ -143,6 +155,7 @@ def monthly_yearly_report(config: Config, logger, model=None, dry_run=False, no_
         md.append("\n")
 
     # AI forecast: next year
+    ai_success = False
     if not no_ai and model is not None:
         strategist = Strategist(
             config, logger, snapshot or {}, q.news, Cortex(config, logger).get_formatted_history(), model=model
@@ -157,10 +170,13 @@ def monthly_yearly_report(config: Config, logger, model=None, dry_run=False, no_
             response_text = response.text
             md.append("\n## AI Forecast for Next Year\n")
             md.append(response_text + "\n")
+            ai_success = True
         except Exception as e:
             logger.error(f"AI generation failed: {e}")
+            md.append("\n## AI Forecast for Next Year\n")
+            md.append("*AI analysis pending - quota limit reached or error occurred.*\n")
 
-    write_report(path, "\n".join(md))
+    write_report(path, "\n".join(md), doc_type="reports", ai_processed=ai_success)
     logger.info(f"Monthly & Yearly report written to {path}")
     return path
 
@@ -189,6 +205,7 @@ def weekly_rundown(config: Config, logger, model=None, dry_run=False, no_ai=Fals
             f"- **{k}**: Price: ${v.get('price')} | Change: {v.get('change')}% | RSI: {v.get('rsi')} | ADX: {v.get('adx')}\n"
         )
 
+    ai_success = False
     if not no_ai and model is not None:
         strategist = Strategist(
             config, logger, snapshot, q.news, Cortex(config, logger).get_formatted_history(), model=model
@@ -203,8 +220,11 @@ def weekly_rundown(config: Config, logger, model=None, dry_run=False, no_ai=Fals
             response = model.generate_content(prompt)
             md.append("## AI Tactical Thesis\n")
             md.append(response.text + "\n")
+            ai_success = True
         except Exception as e:
             logger.error(f"AI generation failed: {e}")
+            md.append("## AI Tactical Thesis\n")
+            md.append("*AI analysis pending - quota limit reached or error occurred.*\n")
     else:
         md.append("## Tactical Thesis (No AI Mode)\n")
         md.append("AI disabled; provide your own tactical notes or re-run with AI enabled for an automated thesis.\n")
@@ -225,7 +245,7 @@ def weekly_rundown(config: Config, logger, model=None, dry_run=False, no_ai=Fals
         except Exception:
             continue
 
-    write_report(report_path, "\n".join(md))
+    write_report(report_path, "\n".join(md), doc_type="reports", ai_processed=ai_success)
     logger.info(f"Weekly rundown written to {report_path}")
     return report_path
 
