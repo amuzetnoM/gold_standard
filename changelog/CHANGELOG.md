@@ -2,7 +2,7 @@
 
 All notable changes to Gold Standard are documented in this file.
 
-The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
@@ -16,6 +16,14 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - `scripts/local_llm.py` - Local LLM provider abstraction layer
   - Dual backend support: pyvdb (native C++) and llama-cpp-python (pip)
   - `HAS_LLM_SUPPORT`, `BACKEND` flags for runtime detection
+
+- **Local LLM GPU & Configuration Support**
+  - Full GPU acceleration via `LOCAL_LLM_GPU_LAYERS` (-1=all, 0=CPU)
+  - Environment variable configuration for all LLM settings
+  - Auto-discovery of GGUF models in models/ directory
+  - Optional auto-download of default model (`LOCAL_LLM_AUTO_DOWNLOAD=1`)
+  - Configurable context window (`LOCAL_LLM_CONTEXT=4096`)
+  - PREFER_LOCAL_LLM option to bypass Gemini entirely
 
 - **Document Lifecycle Management System**
   - New `document_lifecycle` SQLite table for tracking document states

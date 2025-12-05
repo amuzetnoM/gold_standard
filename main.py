@@ -121,27 +121,50 @@ class GeminiProvider(LLMProvider):
 
 
 class LocalLLMProvider(LLMProvider):
-    """Local LLM provider using llama.cpp via Vector Studio."""
+    """Local LLM provider using llama-cpp-python.
 
-    def __init__(self, model_path: str = None):
+    Supports both CPU and GPU inference. Configure via environment variables:
+    - LOCAL_LLM_MODEL: Path to GGUF model
+    - LOCAL_LLM_GPU_LAYERS: GPU offload (0=CPU, -1=all layers to GPU)
+    - LOCAL_LLM_CONTEXT: Context window size
+    - LOCAL_LLM_AUTO_DOWNLOAD: Auto-download model if none found
+    """
+
+    def __init__(self, model_path: str = None, auto_find: bool = True):
         self.name = "Local"
         self._llm = None
         self._available = False
 
         try:
-            from scripts.local_llm import GeminiCompatibleLLM, LocalLLM
+            from scripts.local_llm import GeminiCompatibleLLM, LLMConfig, LocalLLM, get_env_int
+
+            # Build config from environment
+            config = LLMConfig(
+                n_gpu_layers=get_env_int("LOCAL_LLM_GPU_LAYERS", 0),
+                n_ctx=get_env_int("LOCAL_LLM_CONTEXT", 4096),
+                n_threads=get_env_int("LOCAL_LLM_THREADS", 0),
+            )
 
             if model_path:
-                self._llm = GeminiCompatibleLLM(model_path)
+                self._llm = GeminiCompatibleLLM(model_path, **vars(config))
                 self._available = self._llm._llm.is_loaded
-            else:
-                # Try to find a model
-                llm = LocalLLM()
-                models = llm.find_models()
-                if models:
-                    self._llm = GeminiCompatibleLLM(models[0]["path"])
-                    self._available = self._llm._llm.is_loaded
-        except ImportError:
+                if self._available:
+                    gpu_info = f"GPU layers: {config.n_gpu_layers}" if config.n_gpu_layers else "CPU only"
+                    print(f"[LLM] Local model loaded ({gpu_info})")
+            elif auto_find:
+                # Try to find a model or auto-download
+                llm = LocalLLM(config=config)
+                if llm.is_loaded:
+                    self._llm = GeminiCompatibleLLM.__new__(GeminiCompatibleLLM)
+                    self._llm._llm = llm
+                    self._available = True
+                else:
+                    models = llm.find_models()
+                    if models:
+                        self._llm = GeminiCompatibleLLM(models[0]["path"], **vars(config))
+                        self._available = self._llm._llm.is_loaded
+        except ImportError as e:
+            print(f"[LLM] Local LLM not available: {e}")
             pass
 
     @property
@@ -157,7 +180,12 @@ class LocalLLMProvider(LLMProvider):
 class FallbackLLMProvider(LLMProvider):
     """
     Robust LLM provider with automatic fallback chain.
-    Tries Gemini first, falls back to local LLM after 1 failure.
+
+    Fallback Order:
+    1. Gemini API (cloud, high quality)
+    2. Local LLM (on-device, no quota limits)
+
+    Switches to local after just 1 Gemini failure for fast recovery.
     """
 
     def __init__(self, config: "Config", logger: logging.Logger):
@@ -169,6 +197,7 @@ class FallbackLLMProvider(LLMProvider):
         self._current = None
         self._gemini_failures = 0
         self._max_gemini_failures = 1  # Switch to local after 1 failure
+        self._switched_to_local = False
 
         # Initialize Gemini (primary)
         if config.GEMINI_API_KEY:
@@ -177,26 +206,37 @@ class FallbackLLMProvider(LLMProvider):
                 self._gemini = GeminiProvider(config.GEMINI_MODEL)
                 self._current = self._gemini
                 self.name = "Gemini+Fallback"
-                logger.info(f"[LLM] Primary: Gemini ({config.GEMINI_MODEL})")
+                logger.info(f"[LLM] ✓ Primary: Gemini ({config.GEMINI_MODEL})")
             except Exception as e:
-                logger.warning(f"[LLM] Gemini init failed: {e}")
+                logger.warning(f"[LLM] ✗ Gemini init failed: {e}")
 
         # Initialize local LLM (fallback)
         try:
-            self._local = LocalLLMProvider()
+            self._local = LocalLLMProvider(
+                model_path=config.LOCAL_LLM_MODEL if config.LOCAL_LLM_MODEL else None, auto_find=True
+            )
             if self._local.is_available:
+                # Get GPU config for logging
+                gpu_layers = config.LOCAL_LLM_GPU_LAYERS
+                gpu_mode = f"GPU ({gpu_layers} layers)" if gpu_layers else "CPU"
+                model_name = config.LOCAL_LLM_MODEL.split("/")[-1] if config.LOCAL_LLM_MODEL else "auto-detected"
+
                 if not self._current:
                     self._current = self._local
                     self.name = "Local"
-                logger.info("[LLM] Fallback: Local LLM ready")
+                    logger.info(f"[LLM] ✓ Using Local LLM: {model_name} [{gpu_mode}]")
+                else:
+                    logger.info(f"[LLM] ✓ Fallback ready: Local LLM ({model_name}) [{gpu_mode}]")
             else:
                 self._local = None
+                if not self._current:
+                    logger.warning("[LLM] ✗ No local model found. Set LOCAL_LLM_MODEL or LOCAL_LLM_AUTO_DOWNLOAD=1")
         except Exception as e:
             logger.debug(f"[LLM] Local LLM not available: {e}")
             self._local = None
 
         if not self._current:
-            logger.warning("[LLM] No LLM providers available!")
+            logger.warning("[LLM] ⚠ No LLM providers available! AI features disabled.")
 
     @property
     def is_available(self) -> bool:
@@ -217,18 +257,28 @@ class FallbackLLMProvider(LLMProvider):
         return any(p in error_str for p in quota_patterns)
 
     def _switch_to_local(self, reason: str):
-        """Switch to local LLM provider."""
+        """Switch to local LLM provider with detailed logging."""
         if self._local and self._local.is_available:
             self._current = self._local
             self.name = "Local (fallback)"
-            self.logger.warning(f"[LLM] Switched to local LLM: {reason}")
+            self._switched_to_local = True
+            self.logger.warning(f"[LLM] ⚡ Switching to local LLM: {reason[:80]}")
+            self.logger.info("[LLM] ✓ Local LLM activated - continuing without interruption")
             return True
+        self.logger.error("[LLM] ✗ Cannot switch to local - no fallback available")
         return False
 
     def generate_content(self, prompt: str) -> Any:
         """
         Generate content with immediate fallback on quota/errors.
-        Switches to local LLM after just 1 Gemini failure.
+
+        Switches to local LLM after just 1 Gemini failure for:
+        - Quota exhaustion (429 errors)
+        - Rate limiting
+        - API unavailability
+        - Any other transient errors
+
+        Returns a Gemini-compatible response object.
         """
         if not self._current:
             raise RuntimeError("No LLM provider available")
@@ -244,11 +294,14 @@ class FallbackLLMProvider(LLMProvider):
                 return result
             except Exception as e:
                 self._gemini_failures += 1
-                self.logger.warning(f"[LLM] Gemini failed ({self._gemini_failures}/{self._max_gemini_failures}): {e}")
+                error_type = "quota" if self._is_quota_error(e) else "error"
+                self.logger.warning(
+                    f"[LLM] Gemini {error_type} ({self._gemini_failures}/{self._max_gemini_failures}): {str(e)[:60]}"
+                )
 
                 # Immediately switch to local on ANY error (quota, rate limit, etc.)
-                if self._switch_to_local(str(e)[:100]):
-                    # Try local immediately
+                if self._switch_to_local(f"Gemini {error_type}: {str(e)[:50]}"):
+                    # Seamlessly continue with local - no user interruption
                     return self._local.generate_content(prompt)
                 else:
                     raise
@@ -313,9 +366,17 @@ class Config:
     GEMINI_MODEL: str = "models/gemini-pro-latest"
 
     # Local LLM Configuration
+    # LOCAL_LLM_MODEL: Path to GGUF model file
     LOCAL_LLM_MODEL: str = field(default_factory=lambda: os.environ.get("LOCAL_LLM_MODEL", ""))
+    # PREFER_LOCAL_LLM: Set to 1/true to always use local LLM instead of Gemini
     PREFER_LOCAL_LLM: bool = field(
         default_factory=lambda: os.environ.get("PREFER_LOCAL_LLM", "").lower() in ("1", "true", "yes")
+    )
+    # LOCAL_LLM_GPU_LAYERS: Number of layers to offload to GPU (0=CPU, -1=all)
+    LOCAL_LLM_GPU_LAYERS: int = field(default_factory=lambda: int(os.environ.get("LOCAL_LLM_GPU_LAYERS", "0") or "0"))
+    # LOCAL_LLM_AUTO_DOWNLOAD: Auto-download a model if none found (1/true)
+    LOCAL_LLM_AUTO_DOWNLOAD: bool = field(
+        default_factory=lambda: os.environ.get("LOCAL_LLM_AUTO_DOWNLOAD", "").lower() in ("1", "true", "yes")
     )
 
     # Filesystem paths
