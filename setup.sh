@@ -40,7 +40,7 @@ echo -e "      Detected OS: ${CYAN}$OS_TYPE${NC}"
 check_python_version() {
     local python_cmd=$1
     if command -v $python_cmd &> /dev/null; then
-        local version=$($python_cmd --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
+        local version=$($python_cmd --version 2>&1 | grep -oP '\\d+\\.\\d+' | head -1)
         local major=$(echo $version | cut -d. -f1)
         local minor=$(echo $version | cut -d. -f2)
         if [[ $major -eq 3 && $minor -ge 10 && $minor -le 13 ]]; then
