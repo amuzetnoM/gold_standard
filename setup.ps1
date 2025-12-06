@@ -86,7 +86,7 @@ function Get-PythonCommand {
 }
 
 # Check Python installation and version
-Write-Host "[1/6] Checking Python installation..." -ForegroundColor Cyan
+Write-Host "[1/8] Checking Python installation..." -ForegroundColor Cyan
 
 $pythonCmd = Get-PythonCommand
 
@@ -125,7 +125,7 @@ $pythonVersion = Invoke-Expression "$pythonCmd --version" 2>&1
 Write-Host "      Using: $pythonVersion ($pythonCmd)" -ForegroundColor Green
 
 # Create virtual environment (prefer venv312 for numba support)
-Write-Host "[2/6] Creating virtual environment..." -ForegroundColor Cyan
+Write-Host "[2/8] Creating virtual environment..." -ForegroundColor Cyan
 $venvDir = "venv312"
 if (Test-Path $venvDir) {
     Write-Host "      Virtual environment '$venvDir' already exists. Skipping creation." -ForegroundColor Yellow
@@ -146,7 +146,7 @@ if (Test-Path $venvDir) {
 }
 
 # Activate virtual environment
-Write-Host "[3/6] Activating virtual environment..." -ForegroundColor Cyan
+Write-Host "[3/8] Activating virtual environment..." -ForegroundColor Cyan
 try {
     & ".\$venvDir\Scripts\Activate.ps1"
     Write-Host "      Activated $venvDir" -ForegroundColor Green
@@ -157,12 +157,12 @@ try {
 }
 
 # Upgrade pip first
-Write-Host "[4/6] Upgrading pip..." -ForegroundColor Cyan
+Write-Host "[4/8] Upgrading pip..." -ForegroundColor Cyan
 python -m pip install --upgrade pip --quiet
 Write-Host "      pip upgraded" -ForegroundColor Green
 
 # Install dependencies
-Write-Host "[5/6] Installing production dependencies..." -ForegroundColor Cyan
+Write-Host "[5/8] Installing production dependencies..." -ForegroundColor Cyan
 pip install -r requirements.txt --quiet
 if ($LASTEXITCODE -eq 0) {
     Write-Host "      Installed requirements.txt" -ForegroundColor Green
@@ -171,7 +171,7 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 # Install dev dependencies (optional)
-Write-Host "[6/6] Installing development dependencies..." -ForegroundColor Cyan
+Write-Host "[6/8] Installing development dependencies..." -ForegroundColor Cyan
 if (Test-Path "requirements-dev.txt") {
     pip install -r requirements-dev.txt --quiet
     if ($LASTEXITCODE -eq 0) {
@@ -181,6 +181,45 @@ if (Test-Path "requirements-dev.txt") {
     }
 } else {
     Write-Host "      Skipped (requirements-dev.txt not found)" -ForegroundColor Yellow
+}
+
+# Ollama setup and model downloads
+Write-Host "[7/8] Checking Ollama setup..." -ForegroundColor Cyan
+$ollamaCmd = $null
+try {
+    $ollamaCmd = Get-Command ollama -ErrorAction Stop
+} catch {
+    $ollamaCmd = $null
+}
+
+if ($null -ne $ollamaCmd) {
+    Write-Host "      Ollama CLI detected ($($ollamaCmd.Source))." -ForegroundColor Green
+    $ollamaModels = @("llama3.2")
+    foreach ($model in $ollamaModels) {
+        Write-Host "      Pulling Ollama model '$model'..." -ForegroundColor Gray
+        ollama pull $model
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "      Ollama model '$model' ready." -ForegroundColor Green
+        } else {
+            Write-Host "      WARNING: Failed to pull '$model'. Start Ollama with 'ollama serve' and retry." -ForegroundColor Yellow
+        }
+    }
+} else {
+    Write-Host "      Ollama CLI not found. Skipping Ollama model download." -ForegroundColor Yellow
+    Write-Host "      Install Ollama from https://ollama.ai to enable the local provider." -ForegroundColor Gray
+}
+
+# GGUF downloads for llama.cpp fallback
+Write-Host "[8/8] Downloading GGUF models..." -ForegroundColor Cyan
+$ggufModels = @("mistral-7b")
+foreach ($model in $ggufModels) {
+    Write-Host "      Downloading GGUF model '$model'..." -ForegroundColor Gray
+    python scripts/local_llm.py --download $model
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "      GGUF model '$model' ready." -ForegroundColor Green
+    } else {
+        Write-Host "      WARNING: Failed to download GGUF model '$model'." -ForegroundColor Yellow
+    }
 }
 
 # Setup .env file
@@ -222,9 +261,10 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  1. Edit .env and add your GEMINI_API_KEY"
-Write-Host "  2. Run: python run.py --mode daily --no-ai  (test without AI)"
-Write-Host "  3. Run: python run.py  (daemon mode, runs every 4 hours)"
-Write-Host "  4. Run: python gui.py  (GUI dashboard)"
+Write-Host "  2. (Optional) Start Ollama service: ollama serve"
+Write-Host "  3. Run: python run.py --mode daily --no-ai  (test without AI)"
+Write-Host "  4. Run: python run.py  (daemon mode, runs every 4 hours)"
+Write-Host "  5. Run: python gui.py  (GUI dashboard)"
 Write-Host ""
 Write-Host "Virtual environment '$venvDir' is now active." -ForegroundColor Green
 Write-Host "To deactivate later, run: deactivate" -ForegroundColor Gray
