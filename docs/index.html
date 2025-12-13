@@ -52,6 +52,14 @@
             width: 100%;
             height: 100%;
             z-index: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+
+        #p5-background canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
         }
 
         body > * {
@@ -1239,7 +1247,6 @@
             .nav-toggle { display: block; }
             .nav-cta { display: flex; gap: 0.5rem; }
             .features-grid, .modules-grid, .stats-grid, .doc-cards { grid-template-columns: 1fr; }
-            #p5-background { display: none; }
             .arch-visual { padding: 1rem; }
             .hero { padding: 6rem 1rem 3rem; }
         }
@@ -1260,6 +1267,206 @@
             .content h1, .section-title { font-size: 1.25rem; }
             .doc-card, .module-card, .spec-card, .feature-item { padding: 1rem; }
             .stat-item { padding: 1rem; }
+        }
+
+        /* Comprehensive Mobile Responsiveness */
+        @media (max-width: 768px) {
+            /* Prevent horizontal overflow */
+            html, body {
+                overflow-x: hidden;
+                max-width: 100vw;
+            }
+
+            /* Code blocks */
+            code, pre, .command-list code {
+                font-size: 0.7rem;
+                word-break: break-all;
+                overflow-wrap: break-word;
+                white-space: pre-wrap;
+            }
+
+            /* Architecture flow */
+            .arch-visual {
+                padding: 1rem;
+            }
+
+            .flow-row {
+                flex-direction: column;
+                gap: 0.75rem;
+            }
+
+            .flow-node {
+                min-width: auto;
+                width: 100%;
+                max-width: 200px;
+                padding: 0.75rem 1rem;
+            }
+
+            .flow-node-icon {
+                font-size: 1.25rem;
+            }
+
+            .flow-node-label {
+                font-size: 0.75rem;
+            }
+
+            .flow-node-sub {
+                font-size: 0.6rem;
+            }
+
+            .flow-branch {
+                flex-direction: column;
+                padding: 1rem;
+                gap: 0.75rem;
+            }
+
+            .flow-connector {
+                transform: rotate(90deg);
+            }
+
+            .flow-connector.vertical {
+                transform: none;
+                height: 24px;
+            }
+
+            /* Provider section */
+            .provider-visual {
+                padding: 1.5rem 1rem;
+            }
+
+            .provider-grid {
+                gap: 1rem;
+            }
+
+            .provider-card {
+                padding: 1rem;
+            }
+
+            .provider-icon {
+                width: 36px;
+                height: 36px;
+                font-size: 1rem;
+            }
+
+            .provider-name {
+                font-size: 0.8rem;
+            }
+
+            .provider-type {
+                font-size: 0.65rem;
+            }
+
+            .provider-modes {
+                grid-template-columns: 1fr;
+            }
+
+            .mode-card {
+                padding: 1rem;
+            }
+
+            /* Section headers */
+            .section-header {
+                margin-bottom: 2rem;
+            }
+
+            .section-title {
+                font-size: 1.5rem;
+            }
+
+            .section-desc {
+                font-size: 0.95rem;
+            }
+
+            /* Stats */
+            .stats-bar {
+                padding: 0 0.75rem;
+            }
+
+            .stat-value {
+                font-size: 1.25rem;
+            }
+
+            .stat-label {
+                font-size: 0.7rem;
+            }
+
+            /* Feature items */
+            .feature-item {
+                flex-direction: column;
+                gap: 0.75rem;
+                padding: 1.25rem;
+            }
+
+            .feature-icon {
+                width: 36px;
+                height: 36px;
+            }
+
+            /* Module cards */
+            .module-icon {
+                width: 40px;
+                height: 40px;
+            }
+
+            .module-name {
+                font-size: 1rem;
+            }
+
+            .module-desc {
+                font-size: 0.85rem;
+            }
+
+            /* Command groups */
+            .command-group {
+                padding: 1.25rem;
+            }
+
+            .command-group h4 {
+                font-size: 0.85rem;
+            }
+
+            /* Integration cards */
+            .integration-card {
+                padding: 1.25rem;
+            }
+
+            .integration-icon {
+                width: 40px;
+                height: 40px;
+            }
+
+            /* Spec cards */
+            .spec-card {
+                padding: 1.25rem;
+            }
+
+            /* Tables */
+            table {
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Long text wrapping */
+            .hero-desc, .section-desc, .module-desc, .feature-content p {
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+            }
+
+            /* Footer */
+            footer {
+                padding: 1.5rem 0.75rem;
+            }
+        }
+
+        @media (max-width: 400px) {
+            .hero h1 { font-size: 1.35rem; }
+            .hero-badge { font-size: 0.7rem; padding: 0.25rem 0.6rem; }
+            .hero-desc { font-size: 0.9rem; }
+            .section-title { font-size: 1.25rem; }
+            .flow-node { max-width: 160px; padding: 0.6rem 0.8rem; }
+            .btn { padding: 0.6rem 1rem; font-size: 0.8rem; }
+            .nav-cta .btn { padding: 0.4rem 0.6rem; font-size: 0.75rem; }
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
@@ -2198,15 +2405,32 @@ Max Drawdown: -2.1%
             hero.insertBefore(dustContainer, hero.firstChild);
 
             const dustCanvas = document.createElement('canvas');
+            dustCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;';
             dustContainer.appendChild(dustCanvas);
             const ctx = dustCanvas.getContext('2d');
 
+            // Track canvas dimensions
+            let canvasW = 0, canvasH = 0;
+
             function resizeDust() {
-                dustCanvas.width = hero.offsetWidth;
-                dustCanvas.height = hero.offsetHeight;
+                const oldW = canvasW, oldH = canvasH;
+                canvasW = hero.offsetWidth;
+                canvasH = hero.offsetHeight;
+                dustCanvas.width = canvasW;
+                dustCanvas.height = canvasH;
+                // Rescale particle positions proportionally
+                if (oldW > 0 && oldH > 0 && particles.length > 0) {
+                    const scaleX = canvasW / oldW;
+                    const scaleY = canvasH / oldH;
+                    particles.forEach(p => {
+                        p.x *= scaleX;
+                        p.y *= scaleY;
+                    });
+                }
             }
             resizeDust();
             window.addEventListener('resize', resizeDust);
+            window.addEventListener('orientationchange', () => setTimeout(resizeDust, 100));
 
             // Gold dust particles
             const particles = [];
@@ -2217,8 +2441,8 @@ Max Drawdown: -2.1%
                     this.reset();
                 }
                 reset() {
-                    this.x = Math.random() * dustCanvas.width;
-                    this.y = Math.random() * dustCanvas.height;
+                    this.x = Math.random() * canvasW;
+                    this.y = Math.random() * canvasH;
                     this.size = Math.random() * 3 + 1;
                     this.speedX = (Math.random() - 0.5) * 0.5;
                     this.speedY = -Math.random() * 0.8 - 0.2;
@@ -2237,9 +2461,12 @@ Max Drawdown: -2.1%
                     this.opacity -= this.fadeSpeed;
                     if (this.opacity <= 0 || this.y < -10) {
                         this.reset();
-                        this.y = dustCanvas.height + 10;
+                        this.y = canvasH + 10;
                         this.opacity = Math.random() * 0.6 + 0.2;
                     }
+                    // Keep within horizontal bounds
+                    if (this.x < 0) this.x = canvasW;
+                    if (this.x > canvasW) this.x = 0;
                 }
                 draw() {
                     const glow = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 3);
@@ -2268,7 +2495,7 @@ Max Drawdown: -2.1%
             }
 
             function animateDust() {
-                ctx.clearRect(0, 0, dustCanvas.width, dustCanvas.height);
+                ctx.clearRect(0, 0, canvasW, canvasH);
                 particles.forEach(p => {
                     p.update();
                     p.draw();
