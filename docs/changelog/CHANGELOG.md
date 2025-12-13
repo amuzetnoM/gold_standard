@@ -1,8 +1,96 @@
 # Changelog
 
+[![Version](https://img.shields.io/badge/version-3.3.1-blue.svg)](https://github.com/amuzetnoM/gold_standard/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](https://ghcr.io/amuzetnom/gold_standard)
+
 All notable changes to Gold Standard are documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## Active Development Focus
+
+> **Status:** `IN PROGRESS` | **Target:** v3.4.0 | **Priority:** Production Hardening
+
+The following areas represent the current engineering focus for enhancing system robustness, maintainability, and autonomous operation capabilities.
+
+---
+
+### 1. Enhanced Observability and Alerting
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| **Consolidated Dashboards** | `PLANNED` | Integrate application logs (`run.log`, `cleanup.log`) into Grafana alongside system and Docker metrics for single-pane monitoring |
+| **Proactive Alerting** | `PLANNED` | Implement comprehensive Alertmanager rules for critical operational issues |
+
+**Planned Alert Rules:**
+- Container failures and excessive restart detection
+- Low disk space warnings for `/mnt/newdisk`
+- API connection failures (yfinance, Gemini, Notion, ImgBB)
+- LLM quota limit proximity warnings
+
+---
+
+### 2. Advanced API Management and Resilience
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| **Dynamic LLM Fallback** | `PLANNED` | Enhance `FallbackLLMProvider` with performance-based provider promotion and demotion logic |
+| **Centralized Quota Tracking** | `PLANNED` | Internal API usage tracking system for Gemini, Notion, and ImgBB with preemptive rate limiting |
+
+**Design Considerations:**
+- Admin notifications when fallback providers are engaged
+- Smart delays to prevent hitting provider limits proactively
+- Free-tier constraint management
+
+---
+
+### 3. Configuration Management and Deployment
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| **Structured Configuration** | `PLANNED` | YAML/TOML configuration for non-secret parameters (TA thresholds, asset lists, model parameters) |
+| **Secrets Management** | `PLANNED` | Integration with Docker secrets, HashiCorp Vault, or cloud-native secrets managers |
+| **Deployment Automation** | `PLANNED` | CI/CD pipeline for automated builds, registry pushes, and service updates |
+
+**Automation Targets:**
+- Automatic code pull and image rebuild
+- Container registry push workflows
+- Systemd service orchestration
+
+---
+
+### 4. Application Monitoring and Self-Healing
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| **Granular Health Checks** | `PLANNED` | Extended container healthchecks covering database connectivity and external API reachability |
+| **Error Reporting Integration** | `PLANNED` | Sentry or Bugsnag integration for automatic exception capture and categorization |
+
+---
+
+### 5. Data Integrity and Archiving
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| **Automated Database Backups** | `PLANNED` | Scheduled SQLite backups to cloud storage or off-disk locations |
+| **Enhanced File Organization** | `PLANNED` | Configurable naming conventions, improved deduplication logic, customizable archival rules |
+
+**Backup Strategy:**
+- Daily incremental backups
+- Weekly full backups
+- Off-site replication for disaster recovery
+
+---
+
+> **Contribution Note:** These improvements are designed to evolve Gold Standard into a resilient, intelligent, and fully autonomous quantitative analysis platform with minimal manual intervention requirements.
+
+---
+
+## Release History
 
 ---
 
