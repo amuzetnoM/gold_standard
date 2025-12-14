@@ -710,18 +710,21 @@ class Cortex:
                         template_content = t.read()
                     with open(self.config.MEMORY_FILE, "w", encoding="utf-8") as f:
                         f.write(template_content)
-                    self.logger.debug(f"Initialized memory file from template: {self.config.MEMORY_FILE}")
-
+                    self.logger.info(f"Initialized new memory file from template: {self.config.MEMORY_FILE}")
+                
                 if os.path.exists(self.config.MEMORY_FILE):
                     with open(self.config.MEMORY_FILE, "r", encoding="utf-8") as f:
                         loaded = json.load(f)
+                        self.logger.info(f"Successfully loaded memory from {self.config.MEMORY_FILE}")
                         return {**default_memory, **loaded}
+                else:
+                    self.logger.warning(f"Memory file not found at {self.config.MEMORY_FILE}. Starting with default memory.")
         except filelock.Timeout:
-            self.logger.error("Could not acquire memory file lock (timeout)")
+            self.logger.error(f"Could not acquire memory file lock for {self.config.MEMORY_FILE} (timeout). Another process might be holding it.", exc_info=True)
         except json.JSONDecodeError as e:
-            self.logger.error(f"Memory file corrupted: {e}. Starting fresh.")
+            self.logger.error(f"Memory file {self.config.MEMORY_FILE} corrupted: {e}. Starting fresh with default memory.", exc_info=True)
         except Exception as e:
-            self.logger.error(f"Error loading memory: {e}")
+            self.logger.error(f"Unexpected error loading memory from {self.config.MEMORY_FILE}: {e}", exc_info=True)
 
         return default_memory
 
@@ -731,11 +734,12 @@ class Cortex:
             with self.lock:
                 with open(self.config.MEMORY_FILE, "w", encoding="utf-8") as f:
                     json.dump(self.memory, f, indent=4)
+            self.logger.info(f"Successfully saved memory to {self.config.MEMORY_FILE}")
             return True
         except filelock.Timeout:
-            self.logger.error("Could not acquire memory file lock for writing")
+            self.logger.error(f"Could not acquire memory file lock for writing to {self.config.MEMORY_FILE} (timeout). Another process might be holding it.", exc_info=True)
         except Exception as e:
-            self.logger.error(f"Error saving memory: {e}")
+            self.logger.error(f"Unexpected error saving memory to {self.config.MEMORY_FILE}: {e}", exc_info=True)
         return False
 
     def update_memory(

@@ -317,3 +317,7 @@ networks:
     driver: bridge
     name: gold-standard-network
 
+volumes:
+  gost_data:
+  gost_output:
+

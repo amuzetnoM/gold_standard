@@ -67,9 +67,11 @@ Thumbs.db
 
 # Local configuration
 .env
+secrets.env
 cortex_memory.json
 data/*.db
 output/
+docker-data/
 
 # Docker
 Dockerfile*

@@ -216,11 +216,61 @@
       "date": "2025-12-13",
       "organized_at": "2025-12-13T12:00:32.880054",
       "size_bytes": 3920
+    },
+    "/app/output/reports/premarket/PreMarket_2025-12-14.md": {
+      "original_name": "premarket_2025-12-14.md",
+      "category": "premarket",
+      "date": "2025-12-14",
+      "organized_at": "2025-12-14T16:20:04.908578",
+      "size_bytes": 7300
+    },
+    "/app/output/reports/journals/Journal_2025-12-14.md": {
+      "original_name": "Journal_2025-12-14.md",
+      "category": "journals",
+      "date": "2025-12-14",
+      "organized_at": "2025-12-14T14:09:40.401508",
+      "size_bytes": 6601
+    },
+    "/app/output/reports/economic/EconCalendar_2025-12-14.md": {
+      "original_name": "economic_calendar_2025-12-14.md",
+      "category": "economic",
+      "date": "2025-12-14",
+      "organized_at": "2025-12-14T14:09:40.403226",
+      "size_bytes": 8629
+    },
+    "/app/output/reports/catalysts/Catalysts_2025-12-14.md": {
+      "original_name": "catalysts_2025-12-14.md",
+      "category": "catalysts",
+      "date": "2025-12-14",
+      "organized_at": "2025-12-14T14:09:40.404620",
+      "size_bytes": 4796
+    },
+    "/app/output/reports/analysis/1Y_2025-12-14.md": {
+      "original_name": "1y_2025-12-14.md",
+      "category": "analysis",
+      "date": "2025-12-14",
+      "organized_at": "2025-12-14T14:09:40.405897",
+      "size_bytes": 3315
+    },
+    "/app/output/reports/analysis/3M_2025-12-14.md": {
+      "original_name": "3m_2025-12-14.md",
+      "category": "analysis",
+      "date": "2025-12-14",
+      "organized_at": "2025-12-14T14:09:40.406533",
+      "size_bytes": 3241
+    },
+    "/app/output/reports/institutional/InstMatrix_2025-12-14.md": {
+      "original_name": "inst_matrix_2025-12-14.md",
+      "category": "institutional",
+      "date": "2025-12-14",
+      "organized_at": "2025-12-14T14:09:40.407217",
+      "size_bytes": 3422
     }
   },
   "categories": {
     "journals": [
-      "/app/output/reports/journals/Journal_2025-12-13.md"
+      "/app/output/reports/journals/Journal_2025-12-13.md",
+      "/app/output/reports/journals/Journal_2025-12-14.md"
     ],
     "premarket": [
       "/app/output/reports/premarket/PreMarket_2025-12-13.md",
@@ -714,7 +764,32 @@
       "/app/output/reports/premarket/PreMarket_2025-12-13.md",
       "/app/output/reports/premarket/PreMarket_2025-12-13.md",
       "/app/output/reports/premarket/PreMarket_2025-12-13.md",
-      "/app/output/reports/premarket/PreMarket_2025-12-13.md"
+      "/app/output/reports/premarket/PreMarket_2025-12-13.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md",
+      "/app/output/reports/premarket/PreMarket_2025-12-14.md"
     ],
     "weekly": [
       "/app/output/reports/weekly/Weekly_W50_2025-12-13.md"
@@ -724,17 +799,22 @@
     ],
     "yearly": [],
     "catalysts": [
-      "/app/output/reports/catalysts/Catalysts_2025-12-13.md"
+      "/app/output/reports/catalysts/Catalysts_2025-12-13.md",
+      "/app/output/reports/catalysts/Catalysts_2025-12-14.md"
     ],
     "institutional": [
-      "/app/output/reports/institutional/InstMatrix_2025-12-13.md"
+      "/app/output/reports/institutional/InstMatrix_2025-12-13.md",
+      "/app/output/reports/institutional/InstMatrix_2025-12-14.md"
     ],
     "analysis": [
       "/app/output/reports/analysis/1Y_2025-12-13.md",
-      "/app/output/reports/analysis/3M_2025-12-13.md"
+      "/app/output/reports/analysis/3M_2025-12-13.md",
+      "/app/output/reports/analysis/1Y_2025-12-14.md",
+      "/app/output/reports/analysis/3M_2025-12-14.md"
     ],
     "economic": [
-      "/app/output/reports/economic/EconCalendar_2025-12-13.md"
+      "/app/output/reports/economic/EconCalendar_2025-12-13.md",
+      "/app/output/reports/economic/EconCalendar_2025-12-14.md"
     ],
     "research": [],
     "charts": [],
@@ -6497,20 +6577,20 @@
       "/app/output/reports/FILE_INDEX_2025-12-13_2025-12-13_2025-12-13_2025-12-13_2025-12-13.md"
     ]
   },
-  "last_updated": "2025-12-13T12:02:31.613819",
+  "last_updated": "2025-12-14T16:20:04.929180",
   "statistics": {
-    "total_files": 31,
+    "total_files": 38,
     "total_archived": 0,
     "by_category": {
-      "journals": 1,
-      "premarket": 492,
+      "journals": 2,
+      "premarket": 517,
       "weekly": 1,
       "monthly": 1,
       "yearly": 0,
-      "catalysts": 1,
-      "institutional": 1,
-      "analysis": 2,
-      "economic": 1,
+      "catalysts": 2,
+      "institutional": 2,
+      "analysis": 4,
+      "economic": 2,
       "research": 0,
       "charts": 0,
       "other": 5756
