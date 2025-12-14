@@ -74,6 +74,8 @@ nosetests.xml
 # -----------------------------------------------------------------------------
 docs/_build/
 data/
+# Changelog release guide (local working file)
+docs/changelog/RELEASE_PROCESS.md
 
 # -----------------------------------------------------------------------------
 # PyBuilder
