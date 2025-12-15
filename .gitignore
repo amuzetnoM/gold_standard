@@ -262,6 +262,8 @@ cortex_memory.lock
 *.sqlite
 *.sqlite3
 data/*.db
+# Explicitly ignore the Gold Standard app database
+data/gold_standard.db
 
 # -----------------------------------------------------------------------------
 # Project-Specific: Temporary Files
@@ -273,3 +275,4 @@ data/*.db
 tmp/
 temp/
 twine-draft.txt
+docker-data/

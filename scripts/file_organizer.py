@@ -208,6 +208,7 @@ class FileOrganizer:
             self.logger.warning(f"[ORGANIZER] Source file not found: {source_path}")
             return None
 
+        # (Incoming change removed; skip logic handled below to cover casing)
         filename = source_path.name
 
         # Skip FILE_INDEX files to prevent recursive renaming (filename explosion bug)
