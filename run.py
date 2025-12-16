@@ -648,13 +648,15 @@ def _run_post_analysis_tasks():
                         else:
                             # Increment retry count on failure
                             retry_count = db.increment_retry_count(result.action_id, result.error_message)
-                            if retry_count >= MAX_RETRIES:
+                            # Use environment-configurable LLM_MAX_RETRIES (-1 == unlimited)
+                            lmax = int(os.getenv("LLM_MAX_RETRIES", str(MAX_RETRIES)))
+                            if lmax >= 0 and retry_count >= lmax:
                                 db.update_action_status(
                                     result.action_id, "failed", f"Max retries exceeded: {result.error_message}"
                                 )
                                 fail_count += 1
                             else:
-                                # Release back to pending for retry
+                                # Release back to pending for retry (no scheduling here - daemon will stagger)
                                 db.release_action(result.action_id, reason=f"retry_{retry_count}")
 
                     notion_count = executor.stats.get("notion_published", 0)

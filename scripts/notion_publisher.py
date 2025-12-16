@@ -40,6 +40,8 @@ except ImportError:
 from dotenv import load_dotenv
 
 load_dotenv()
+import hashlib
+from filelock import FileLock
 
 # Import database manager for sync tracking
 try:
@@ -650,16 +652,42 @@ class NotionPublisher:
                     "reason": "File unchanged since last sync",
                 }
 
-        # Extract title from H1 or filename
-        h1_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-        title = h1_match.group(1).strip() if h1_match else filename.replace(".md", "").replace("_", " ")
+        # Acquire per-file publish lock to avoid concurrent publishes creating duplicates
+        lock_dir = Path(self.config.database_id or PROJECT_ROOT / ".cache") / "notion_locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_name = hashlib.md5(str(path).encode()).hexdigest() + ".lock"
+        lock_path = lock_dir / lock_name
 
-        result = self.publish(title=title, content=content, doc_type=doc_type, tags=tags, filename=filename)
+        try:
+            lock = FileLock(str(lock_path), timeout=5)
+            lock.acquire()
+        except Exception:
+            # Another process is publishing this file - skip to avoid duplicates
+            return {
+                "page_id": "",
+                "url": "",
+                "type": doc_type or "notes",
+                "tags": [],
+                "skipped": True,
+                "reason": "publish_in_progress",
+            }
 
-        # Record the sync in the database
-        if DB_AVAILABLE:
-            db = get_db()
-            db.record_notion_sync(str(path), result["page_id"], result["url"], result.get("type", "notes"))
+        try:
+            # Re-check file unchanged and frontmatter before doing actual publish
+            # Extract title from H1 or filename
+            h1_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+            title = h1_match.group(1).strip() if h1_match else filename.replace(".md", "").replace("_", " ")
+            result = self.publish(title=title, content=content, doc_type=doc_type, tags=tags, filename=filename)
+
+            # Record the sync in the database
+            if DB_AVAILABLE:
+                db = get_db()
+                db.record_notion_sync(str(path), result["page_id"], result["url"], result.get("type", "notes"))
+        finally:
+            try:
+                lock.release()
+            except Exception:
+                pass
 
         result["skipped"] = False
         return result

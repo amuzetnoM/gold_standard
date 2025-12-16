@@ -41,6 +41,7 @@ import logging
 import re
 import sys
 import time
+import os
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -61,9 +62,11 @@ except ImportError:
 # ==========================================
 
 # Retry settings for AI quota issues
-MAX_RETRIES = 3
-INITIAL_BACKOFF_SECONDS = 30
-MAX_BACKOFF_SECONDS = 600  # 10 minutes max wait
+# Default retry configuration - can be overridden via env var LLM_MAX_RETRIES
+# Set LLM_MAX_RETRIES=-1 to retry indefinitely (recommended for quota/backoff scenarios)
+MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "3"))
+INITIAL_BACKOFF_SECONDS = int(os.getenv("LLM_INITIAL_BACKOFF", "30"))
+MAX_BACKOFF_SECONDS = int(os.getenv("LLM_MAX_BACKOFF", "600"))  # 10 minutes max wait
 QUOTA_ERROR_PATTERNS = [
     "quota",
     "rate limit",
@@ -161,19 +164,25 @@ class TaskExecutor:
 
     def _wait_for_quota(self, retry_count: int) -> int:
         """Calculate and wait for quota reset. Returns seconds waited."""
-        backoff = min(INITIAL_BACKOFF_SECONDS * (2**retry_count), MAX_BACKOFF_SECONDS)
+        backoff = min(INITIAL_BACKOFF_SECONDS * (2 ** retry_count), MAX_BACKOFF_SECONDS)
         self.logger.warning(
-            f"[EXECUTOR] Quota limit hit. Waiting {backoff}s before retry {retry_count + 1}/{MAX_RETRIES}..."
+            f"[EXECUTOR] Quota limit hit. Waiting {backoff}s before next retry (retry {retry_count + 1}/{'∞' if MAX_RETRIES < 0 else MAX_RETRIES})..."
         )
-        print(f"[EXECUTOR] ⏳ Waiting {backoff}s for API quota reset (retry {retry_count + 1}/{MAX_RETRIES})...")
+        print(f"[EXECUTOR] ⏳ Waiting {backoff}s for API quota reset (retry {retry_count + 1}/{'∞' if MAX_RETRIES < 0 else MAX_RETRIES})...")
         time.sleep(backoff)
         return backoff
 
     def _execute_with_retry(self, action, handler: Callable) -> TaskResult:
-        """Execute a task with retry logic for quota errors."""
+        """Execute a task with retry logic for quota errors.
+
+        - Uses env var LLM_MAX_RETRIES to control max retries (default 3)
+        - If LLM_MAX_RETRIES < 0, retries indefinitely for quota errors with exponential backoff
+        - Non-quota errors return failure immediately
+        """
         last_error = None
 
-        for retry in range(MAX_RETRIES + 1):
+        retry = 0
+        while True:
             try:
                 result = handler(action)
 
@@ -183,20 +192,40 @@ class TaskExecutor:
 
                 # Check if failure is due to quota
                 if result.error_message and self._is_quota_error(result.error_message):
-                    if retry < MAX_RETRIES:
-                        self._wait_for_quota(retry)
+                    if MAX_RETRIES < 0 or retry < MAX_RETRIES:
+                        backoff = self._wait_for_quota(retry)
                         self.stats["retried"] += 1
+                        retry += 1
+                        # Persist retry and release task to pending with scheduled delay so others don't immediately grab it
+                        try:
+                            from db_manager import get_db
+
+                            db = get_db()
+                            db.increment_retry_count(action.action_id, result.error_message)
+                            db.release_action(action.action_id, reason=f"quota_retry_{retry}", delay_seconds=backoff)
+                        except Exception:
+                            pass
                         continue
 
                 # Non-quota error, return failure
+                result.retries = retry
                 return result
 
             except Exception as e:
                 last_error = str(e)
                 if self._is_quota_error(last_error):
-                    if retry < MAX_RETRIES:
-                        self._wait_for_quota(retry)
+                    if MAX_RETRIES < 0 or retry < MAX_RETRIES:
+                        backoff = self._wait_for_quota(retry)
                         self.stats["retried"] += 1
+                        retry += 1
+                        try:
+                            from db_manager import get_db
+
+                            db = get_db()
+                            db.increment_retry_count(action.action_id, last_error)
+                            db.release_action(action.action_id, reason=f"quota_exception_{retry}", delay_seconds=backoff)
+                        except Exception:
+                            pass
                         continue
 
                 return TaskResult(
@@ -219,13 +248,21 @@ class TaskExecutor:
         )
 
     def _publish_to_notion(self, filepath: str, doc_type: str = "research") -> bool:
-        """Publish a completed research file to Notion."""
+        """Publish a completed research file to Notion.
+
+        IMPORTANT: Do NOT force a sync here. Forcing bypasses the frontmatter
+        status checks and the DB-level deduplication in `NotionPublisher.sync_file`
+        and can lead to duplicate Notion pages for the same file if invoked
+        repeatedly. The executor should respect the lifecycle (frontmatter) and
+        let the normal sync flow handle scheduling/dedup.
+        """
         publisher = self._get_notion_publisher()
         if not publisher:
             return False
 
         try:
-            result = publisher.sync_file(filepath, doc_type=doc_type, force=True)
+            # Respect frontmatter and DB checks by not forcing the sync.
+            result = publisher.sync_file(filepath, doc_type=doc_type, force=False)
             if not result.get("skipped"):
                 self.stats["notion_published"] += 1
                 self.logger.info(f"[EXECUTOR] Published to Notion: {Path(filepath).name}")

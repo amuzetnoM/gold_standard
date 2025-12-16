@@ -68,10 +68,11 @@ HEARTBEAT_INTERVAL_SECONDS = 60
 MAX_CONSECUTIVE_ERRORS = 10
 SHUTDOWN_GRACE_PERIOD_SECONDS = 30
 
-# Retry configuration
-MAX_RETRIES = 3
-INITIAL_BACKOFF_SECONDS = 30
-MAX_BACKOFF_SECONDS = 600
+# Retry configuration (overridable via env)
+import os
+MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "3"))
+INITIAL_BACKOFF_SECONDS = int(os.getenv("LLM_INITIAL_BACKOFF", "30"))
+MAX_BACKOFF_SECONDS = int(os.getenv("LLM_MAX_BACKOFF", "600"))
 
 QUOTA_ERROR_PATTERNS = [
     "quota",
@@ -412,10 +413,12 @@ class ExecutorDaemon:
                 # Check if quota error - schedule retry
                 if self._is_quota_error(error_msg):
                     retry_count = db.increment_retry_count(action_id, error_msg)
-                    if retry_count < MAX_RETRIES:
-                        db.release_action(action_id, reason=f"quota_retry_{retry_count}")
+                    if MAX_RETRIES < 0 or retry_count < MAX_RETRIES:
+                        # schedule delayed retry proportional to exponential backoff
+                        backoff = min(INITIAL_BACKOFF_SECONDS * (2 ** max(0, retry_count - 1)), MAX_BACKOFF_SECONDS)
+                        db.release_action(action_id, reason=f"quota_retry_{retry_count}", delay_seconds=backoff)
                         self.stats["tasks_retried"] += 1
-                        self.logger.warning(f"Task quota-limited, will retry: {action_id}")
+                        self.logger.warning(f"Task quota-limited, will retry in {backoff}s: {action_id}")
                         return False
 
                 # Max retries or non-retriable error
@@ -437,7 +440,9 @@ class ExecutorDaemon:
 
             # Release task for retry if retriable
             if self._is_quota_error(error_msg):
-                db.release_action(action_id, reason="exception_quota")
+                retry_count = db.increment_retry_count(action_id, error_msg)
+                backoff = min(INITIAL_BACKOFF_SECONDS * (2 ** max(0, retry_count - 1)), MAX_BACKOFF_SECONDS)
+                db.release_action(action_id, reason=f"exception_quota_{retry_count}", delay_seconds=backoff)
                 self.stats["tasks_retried"] += 1
             else:
                 retry_count = db.increment_retry_count(action_id, error_msg)

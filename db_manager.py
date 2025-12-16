@@ -1740,7 +1740,7 @@ class DatabaseManager:
 
             return cursor.rowcount > 0
 
-    def release_action(self, action_id: str, reason: str = "released") -> bool:
+    def release_action(self, action_id: str, reason: str = "released", delay_seconds: int = 0) -> bool:
         """
         Release a claimed action back to pending state.
 
@@ -1760,20 +1760,38 @@ class DatabaseManager:
             cursor = conn.cursor()
             now = datetime.now().isoformat()
 
-            cursor.execute(
-                """
-                UPDATE action_insights
-                SET status = 'pending',
-                    metadata = json_set(
-                        COALESCE(metadata, '{}'),
-                        '$.released_at', ?,
-                        '$.release_reason', ?
-                    )
-                WHERE action_id = ?
-                  AND status = 'in_progress'
-            """,
-                (now, reason, action_id),
-            )
+            if delay_seconds and isinstance(delay_seconds, int) and delay_seconds > 0:
+                scheduled_for = (datetime.now() + timedelta(seconds=delay_seconds)).isoformat()
+                cursor.execute(
+                    """
+                    UPDATE action_insights
+                    SET status = 'pending',
+                        scheduled_for = ?,
+                        metadata = json_set(
+                            COALESCE(metadata, '{}'),
+                            '$.released_at', ?,
+                            '$.release_reason', ?
+                        )
+                    WHERE action_id = ?
+                      AND status = 'in_progress'
+                """,
+                    (scheduled_for, now, reason, action_id),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE action_insights
+                    SET status = 'pending',
+                        metadata = json_set(
+                            COALESCE(metadata, '{}'),
+                            '$.released_at', ?,
+                            '$.release_reason', ?
+                        )
+                    WHERE action_id = ?
+                      AND status = 'in_progress'
+                """,
+                    (now, reason, action_id),
+                )
 
             return cursor.rowcount > 0
 
