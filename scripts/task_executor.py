@@ -287,83 +287,187 @@ class TaskExecutor:
 
         pending = self.insights_extractor.get_pending_actions()
         self.logger.info(f"[EXECUTOR] Found {len(pending)} pending tasks")
-        print(f"[EXECUTOR] 📋 Processing {len(pending)} pending tasks...")
+        console = None
+        try:
+            from scripts.console_ui import get_console, progress_context
+
+            console = get_console()
+        except Exception:
+            console = None
 
         if not pending:
+            if console:
+                console.print(f"[cyan]📋 Processing 0 pending tasks[/cyan]")
+            else:
+                print(f"[EXECUTOR] 📋 Processing 0 pending tasks...")
             return []
 
         # Process all tasks unless max_tasks specified
         tasks_to_execute = pending if max_tasks is None else pending[:max_tasks]
         results = []
 
-        for i, action in enumerate(tasks_to_execute, 1):
-            try:
-                print(f"[EXECUTOR] 🔄 Task {i}/{len(tasks_to_execute)}: {action.title[:50]}...")
+        # Use rich progress UI if available
+        try:
+            with progress_context(len(tasks_to_execute), description="Executing tasks") as progress:
+                task_id = None
+                try:
+                    task_id = progress.add_task("Executing", total=len(tasks_to_execute))
+                except Exception:
+                    task_id = None
 
-                # Mark as in progress
-                action.status = "in_progress"
+                for i, action in enumerate(tasks_to_execute, 1):
+                    try:
+                        if console:
+                            console.print(f"[yellow]🔄 Task {i}/{len(tasks_to_execute)}:[/yellow] {action.title[:60]}")
+                        else:
+                            print(f"[EXECUTOR] 🔄 Task {i}/{len(tasks_to_execute)}: {action.title[:60]}...")
 
-                # Get the handler
-                handler = self.handlers.get(action.action_type)
-                if not handler:
-                    result = TaskResult(
-                        action_id=action.action_id,
-                        success=False,
-                        result_data=None,
-                        execution_time_ms=0,
-                        error_message=f"Unknown action type: {action.action_type}",
-                    )
-                else:
-                    # Execute with retry logic for quota errors
-                    start_time = time.time()
-                    result = self._execute_with_retry(action, handler)
-                    execution_time = (time.time() - start_time) * 1000
-                    result.execution_time_ms = execution_time
+                        # Mark as in progress
+                        action.status = "in_progress"
 
-                results.append(result)
+                        # Get the handler
+                        handler = self.handlers.get(action.action_type)
+                        if not handler:
+                            result = TaskResult(
+                                action_id=action.action_id,
+                                success=False,
+                                result_data=None,
+                                execution_time_ms=0,
+                                error_message=f"Unknown action type: {action.action_type}",
+                            )
+                        else:
+                            # Execute with retry logic for quota errors
+                            start_time = time.time()
+                            result = self._execute_with_retry(action, handler)
+                            execution_time = (time.time() - start_time) * 1000
+                            result.execution_time_ms = execution_time
 
-                # Update statistics
-                self.stats["total_executed"] += 1
-                self.stats["total_time_ms"] += result.execution_time_ms
+                        results.append(result)
 
-                if result.success:
-                    self.stats["successful"] += 1
-                    print(f"[EXECUTOR] ✅ Completed: {action.title[:40]}")
+                        # Update statistics
+                        self.stats["total_executed"] += 1
+                        self.stats["total_time_ms"] += result.execution_time_ms
 
-                    self.insights_extractor.mark_action_complete(
-                        action.action_id,
-                        json.dumps(result.result_data)
-                        if isinstance(result.result_data, dict)
-                        else str(result.result_data),
-                    )
+                        if result.success:
+                            self.stats["successful"] += 1
+                            if console:
+                                console.print(f"[green]✅ Completed:[/green] {action.title[:50]}")
+                            else:
+                                print(f"[EXECUTOR] ✅ Completed: {action.title[:40]}")
 
-                    # Publish artifacts to Notion
-                    if result.artifacts:
-                        for artifact_path in result.artifacts:
-                            if artifact_path.endswith(".md"):
-                                self._publish_to_notion(artifact_path, doc_type="research")
-                            elif artifact_path.endswith(".json"):
-                                # Convert JSON to markdown for Notion
-                                self._convert_and_publish_json(artifact_path)
-                else:
+                            self.insights_extractor.mark_action_complete(
+                                action.action_id,
+                                json.dumps(result.result_data)
+                                if isinstance(result.result_data, dict)
+                                else str(result.result_data),
+                            )
+
+                            # Publish artifacts to Notion
+                            if result.artifacts:
+                                for artifact_path in result.artifacts:
+                                    if artifact_path.endswith(".md"):
+                                        self._publish_to_notion(artifact_path, doc_type="research")
+                                    elif artifact_path.endswith(".json"):
+                                        # Convert JSON to markdown for Notion
+                                        self._convert_and_publish_json(artifact_path)
+                        else:
+                            self.stats["failed"] += 1
+                            if console:
+                                console.print(f"[red]❌ Failed:[/red] {action.title[:40]} - {result.error_message[:50] if result.error_message else 'Unknown'}")
+                            else:
+                                print(
+                                    f"[EXECUTOR] ❌ Failed: {action.title[:40]} - {result.error_message[:50] if result.error_message else 'Unknown'}"
+                                )
+                            self.insights_extractor.mark_action_failed(action.action_id, result.error_message)
+
+                    except Exception as e:
+                        self.logger.error(f"[EXECUTOR] Error executing {action.action_id}: {e}")
+                        self.stats["failed"] += 1
+                        results.append(
+                            TaskResult(
+                                action_id=action.action_id,
+                                success=False,
+                                result_data=None,
+                                execution_time_ms=0,
+                                error_message=str(e),
+                            )
+                        )
+                    finally:
+                        try:
+                            if task_id is not None:
+                                progress.advance(task_id, 1)
+                        except Exception:
+                            pass
+        except Exception:
+            # Fallback to legacy behavior if progress_context isn't usable
+            for i, action in enumerate(tasks_to_execute, 1):
+                try:
+                    print(f"[EXECUTOR] 🔄 Task {i}/{len(tasks_to_execute)}: {action.title[:50]}...")
+
+                    # Mark as in progress
+                    action.status = "in_progress"
+
+                    # Get the handler
+                    handler = self.handlers.get(action.action_type)
+                    if not handler:
+                        result = TaskResult(
+                            action_id=action.action_id,
+                            success=False,
+                            result_data=None,
+                            execution_time_ms=0,
+                            error_message=f"Unknown action type: {action.action_type}",
+                        )
+                    else:
+                        # Execute with retry logic for quota errors
+                        start_time = time.time()
+                        result = self._execute_with_retry(action, handler)
+                        execution_time = (time.time() - start_time) * 1000
+                        result.execution_time_ms = execution_time
+
+                    results.append(result)
+
+                    # Update statistics
+                    self.stats["total_executed"] += 1
+                    self.stats["total_time_ms"] += result.execution_time_ms
+
+                    if result.success:
+                        self.stats["successful"] += 1
+                        print(f"[EXECUTOR] ✅ Completed: {action.title[:40]}")
+
+                        self.insights_extractor.mark_action_complete(
+                            action.action_id,
+                            json.dumps(result.result_data)
+                            if isinstance(result.result_data, dict)
+                            else str(result.result_data),
+                        )
+
+                        # Publish artifacts to Notion
+                        if result.artifacts:
+                            for artifact_path in result.artifacts:
+                                if artifact_path.endswith(".md"):
+                                    self._publish_to_notion(artifact_path, doc_type="research")
+                                elif artifact_path.endswith(".json"):
+                                    # Convert JSON to markdown for Notion
+                                    self._convert_and_publish_json(artifact_path)
+                    else:
+                        self.stats["failed"] += 1
+                        print(
+                            f"[EXECUTOR] ❌ Failed: {action.title[:40]} - {result.error_message[:50] if result.error_message else 'Unknown'}"
+                        )
+                        self.insights_extractor.mark_action_failed(action.action_id, result.error_message)
+
+                except Exception as e:
+                    self.logger.error(f"[EXECUTOR] Error executing {action.action_id}: {e}")
                     self.stats["failed"] += 1
-                    print(
-                        f"[EXECUTOR] ❌ Failed: {action.title[:40]} - {result.error_message[:50] if result.error_message else 'Unknown'}"
+                    results.append(
+                        TaskResult(
+                            action_id=action.action_id,
+                            success=False,
+                            result_data=None,
+                            execution_time_ms=0,
+                            error_message=str(e),
+                        )
                     )
-                    self.insights_extractor.mark_action_failed(action.action_id, result.error_message)
-
-            except Exception as e:
-                self.logger.error(f"[EXECUTOR] Error executing {action.action_id}: {e}")
-                self.stats["failed"] += 1
-                results.append(
-                    TaskResult(
-                        action_id=action.action_id,
-                        success=False,
-                        result_data=None,
-                        execution_time_ms=0,
-                        error_message=str(e),
-                    )
-                )
 
         self._log_summary(results)
         return results

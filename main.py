@@ -100,7 +100,10 @@ except Exception:
     genai = None
     GENAI_AVAILABLE = False
 
-import mplfinance as mpf
+try:
+    import mplfinance as mpf
+except Exception:
+    mpf = None
 import yfinance as yf
 from colorama import init
 

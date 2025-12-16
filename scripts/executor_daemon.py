@@ -90,32 +90,39 @@ QUOTA_ERROR_PATTERNS = [
 
 
 def setup_logging(log_file: Optional[Path] = None, verbose: bool = False) -> logging.Logger:
-    """Configure logging for the executor daemon."""
+    """Configure logging for the executor daemon with Rich-based terminal UI."""
     logger = logging.getLogger("executor_daemon")
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
-    # Console handler
-    console = logging.StreamHandler(sys.stdout)
-    console.setLevel(logging.DEBUG if verbose else logging.INFO)
-    console.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-    logger.addHandler(console)
+    # Use Rich-based console UI if available
+    try:
+        from scripts.console_ui import setup_console_logging
 
-    # File handler (if specified)
-    if log_file:
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=10 * 1024 * 1024,
-            backupCount=5,  # 10MB
-        )
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
+        setup_console_logging(logger, log_file=str(log_file) if log_file else None, verbose=verbose)
+    except Exception:
+        # Fallback to basic console/file handlers
+        # Console handler
+        console = logging.StreamHandler(sys.stdout)
+        console.setLevel(logging.DEBUG if verbose else logging.INFO)
+        console.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+        logger.addHandler(console)
+
+        # File handler (if specified)
+        if log_file:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = RotatingFileHandler(
+                log_file,
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,  # 10MB
             )
-        )
-        logger.addHandler(file_handler)
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
+            )
+            logger.addHandler(file_handler)
 
     return logger
 
@@ -223,6 +230,29 @@ class ExecutorDaemon:
                 db.release_action(self._current_task_id, reason="daemon_exit")
             except Exception as e:
                 self.logger.error(f"Failed to release task: {e}")
+
+    def _print_status(self, text: str, level: str = "info"):
+        """Helper to print status via rich console if available for better UX."""
+        try:
+            from scripts.console_ui import get_console
+
+            console = get_console()
+            if level == "info":
+                console.print(f"[cyan]{text}[/cyan]")
+            elif level == "warning":
+                console.print(f"[yellow]{text}[/yellow]")
+            elif level == "error":
+                console.print(f"[red]{text}[/red]")
+            else:
+                console.print(text)
+        except Exception:
+            # fallback to logger
+            if level == "error":
+                self.logger.error(text)
+            elif level == "warning":
+                self.logger.warning(text)
+            else:
+                self.logger.info(text)
 
     def _get_db(self):
         """Lazy-load database manager."""
