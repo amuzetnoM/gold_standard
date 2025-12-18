@@ -18,6 +18,7 @@ Provides intelligent redundancy control, date-wise organization, and task manage
 """
 
 import sqlite3
+import json
 from contextlib import contextmanager
 import logging
 from dataclasses import asdict, dataclass
@@ -277,6 +278,29 @@ class DatabaseManager:
                 )
             """)
 
+            # Cortex memory table - dedicated storage for persistent memory (JSON)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS cortex_memory (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    memory_json TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Migrate existing JSON blob from system_config into cortex_memory if present
+            try:
+                cursor.execute("SELECT value FROM system_config WHERE key = 'cortex_memory'")
+                row = cursor.fetchone()
+                cursor.execute("SELECT COUNT(1) as cnt FROM cortex_memory")
+                cnt = cursor.fetchone()["cnt"]
+                if row and row["value"] and cnt == 0:
+                    cursor.execute(
+                        "INSERT INTO cortex_memory (id, memory_json, updated_at) VALUES (1, ?, CURRENT_TIMESTAMP)",
+                        (row["value"],),
+                    )
+            except Exception:
+                pass
+
             # Task execution log - tracks task executor results
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS task_execution_log (
@@ -348,6 +372,28 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_schedule_task ON schedule_tracker(task_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_doc_lifecycle_path ON document_lifecycle(file_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_doc_lifecycle_status ON document_lifecycle(status)")
+
+            # LLM caching and usage tracking
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS llm_cache (
+                    prompt_hash TEXT PRIMARY KEY,
+                    prompt TEXT,
+                    response TEXT,
+                    usage_count INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    last_used TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS llm_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT,
+                    tokens_used INTEGER,
+                    cost REAL,
+                    recorded_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
             # Initialize default schedules if not present
             self._init_default_schedules(cursor)
@@ -1685,6 +1731,82 @@ class DatabaseManager:
             cursor.execute("SELECT value FROM system_config WHERE key = ?", (key,))
             row = cursor.fetchone()
             return row["value"] if row else default
+
+    # ==========================================
+    # CORTEX MEMORY METHODS
+    # ==========================================
+
+    def get_cortex_memory(self) -> Optional[Dict[str, Any]]:
+        """Return the cortex memory as a Python dict if present, else None."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT memory_json FROM cortex_memory WHERE id = 1")
+            row = cursor.fetchone()
+            if not row or not row["memory_json"]:
+                return None
+            try:
+                return json.loads(row["memory_json"])
+            except Exception:
+                return None
+
+    def set_cortex_memory(self, memory: Dict[str, Any]) -> bool:
+        """Persist cortex memory dict into the cortex_memory table (atomic)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            mem_json = json.dumps(memory)
+            # Upsert into single-row table
+            cursor.execute(
+                "INSERT INTO cortex_memory (id, memory_json, updated_at) VALUES (1, ?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET memory_json = excluded.memory_json, updated_at = excluded.updated_at",
+                (mem_json,),
+            )
+            return True
+
+    # ==========================================
+    # LLM CACHE & USAGE
+    # ==========================================
+
+    def get_llm_cache(self, prompt_hash: str) -> Optional[Dict[str, Any]]:
+        """Return cached LLM response by prompt_hash if present."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT prompt, response, usage_count, last_used FROM llm_cache WHERE prompt_hash = ?", (prompt_hash,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "prompt": row["prompt"],
+                "response": row["response"],
+                "usage_count": row["usage_count"],
+                "last_used": row["last_used"],
+            }
+
+    def set_llm_cache(self, prompt_hash: str, prompt: str, response: str) -> bool:
+        """Insert or update LLM cache entry."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO llm_cache (prompt_hash, prompt, response, usage_count, created_at, last_used)
+                VALUES (?, ?, ?, 1, ?, ?)
+                ON CONFLICT(prompt_hash) DO UPDATE SET
+                    response = excluded.response,
+                    usage_count = llm_cache.usage_count + 1,
+                    last_used = excluded.last_used
+                """,
+                (prompt_hash, prompt, response, now, now),
+            )
+            return True
+
+    def log_llm_usage(self, provider: str, tokens_used: int, cost: float = 0.0) -> bool:
+        """Record LLM usage metrics for billing and rate tracking."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO llm_usage (provider, tokens_used, cost, recorded_at) VALUES (?, ?, ?, ?)",
+                (provider, tokens_used, cost, datetime.now().isoformat()),
+            )
+            return True
 
     def set_config(self, key: str, value: str, description: str = None) -> bool:
         """Set a system configuration value."""

@@ -797,6 +797,7 @@ Examples:
     parser.add_argument(
         "--dry-run", action="store_true", help="Simulate execution without actually running tasks (test mode)"
     )
+    parser.add_argument("--supervise", action="store_true", help="Supervise and auto-restart the daemon on crash")
     parser.add_argument(
         "--max-tasks", type=int, default=None, help="Maximum number of tasks to execute (default: unlimited)"
     )
@@ -816,6 +817,32 @@ Examples:
         else:
             print("Failed to spawn executor daemon")
             sys.exit(1)
+
+    # Supervise mode: run a supervisor that restarts the daemon on crash
+    if args.supervise:
+        import subprocess
+
+        backoff = 1
+        max_backoff = 300
+        script = str(Path(__file__).resolve())
+        python_exe = sys.executable
+
+        try:
+            while True:
+                cmd = [python_exe, script, "--daemon", "--log-file", str(args.log_file) if args.log_file else ""]
+                # Remove empty args
+                cmd = [c for c in cmd if c]
+                proc = subprocess.Popen(cmd)
+                logger.info(f"[SUPERVISOR] Spawned child daemon PID={proc.pid}")
+                rc = proc.wait()
+                logger.info(f"[SUPERVISOR] Child exited with code {rc}")
+                time.sleep(backoff)
+                backoff = min(max_backoff, backoff * 2)
+        except KeyboardInterrupt:
+            logger.info("[SUPERVISOR] KeyboardInterrupt received, stopping supervision")
+        except Exception as e:
+            logger.error(f"[SUPERVISOR] Supervision error: {e}")
+        sys.exit(0)
 
     # Setup logging
     log_file = args.log_file or PROJECT_ROOT / "output" / "executor.log"

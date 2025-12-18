@@ -463,6 +463,30 @@ class FallbackLLMProvider(LLMProvider):
         if not self._current:
             raise RuntimeError("No LLM provider available")
 
+        # Lightweight caching: check DB cache for identical prompt
+        try:
+            from db_manager import get_db
+
+            db = get_db()
+            import hashlib
+
+            prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+            cache_entry = db.get_llm_cache(prompt_hash)
+            cache_ttl = int(os.environ.get("LLM_CACHE_TTL_SECONDS", "86400"))
+            if cache_entry and cache_entry.get("last_used"):
+                # If entry exists, return cached response (best-effort freshness)
+                self.logger.info(f"[LLM] Cache hit for prompt (hash={prompt_hash[:8]})")
+                db.set_llm_cache(prompt_hash, cache_entry["prompt"], cache_entry["response"])  # bump usage
+                # Return a simple object mimicking provider response
+                class CachedResp:
+                    def __init__(self, text):
+                        self.text = text
+
+                return CachedResp(cache_entry["response"])
+        except Exception:
+            # Cache unavailable - continue
+            pass
+
         # Track attempts through provider chain
         attempted = set()
 
@@ -470,6 +494,22 @@ class FallbackLLMProvider(LLMProvider):
             attempted.add(self._current)
             try:
                 result = self._current.generate_content(prompt)
+
+                # Best-effort: store in cache and log usage
+                try:
+                    from db_manager import get_db
+                    import hashlib
+
+                    db = get_db()
+                    prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+                    resp_text = getattr(result, "text", str(result))
+                    db.set_llm_cache(prompt_hash, prompt, resp_text)
+                    # Log usage placeholder (tokens/cost may be provider-specific)
+                    provider_name = getattr(self._current, "name", "unknown")
+                    db.log_llm_usage(provider_name, tokens_used=0, cost=0.0)
+                except Exception:
+                    pass
+
                 return result
             except Exception as e:
                 self._primary_failures += 1
@@ -739,6 +779,7 @@ class Cortex:
     def __init__(self, config: Config, logger: logging.Logger):
         self.config = config
         self.logger = logger
+        # Cortex persistence will prefer DB-backed single-row storage
         self.lock = filelock.FileLock(config.LOCK_FILE, timeout=10)
         self.memory = self._load_memory()
 
@@ -771,18 +812,13 @@ class Cortex:
             from db_manager import get_db
 
             db = get_db()
-            mem_json = db.get_config("cortex_memory", None)
-            if mem_json:
-                try:
-                    loaded = json.loads(mem_json)
-                    self.logger.info("Loaded cortex memory from database (system_config:cortex_memory)")
-                    return {**default_memory, **loaded}
-                except Exception:
-                    self.logger.warning("Failed to parse cortex memory from DB; falling back to file/template")
-
+            mem = db.get_cortex_memory()
+            if mem:
+                self.logger.info("Loaded cortex memory from database (cortex_memory table)")
+                return {**default_memory, **mem}
         except Exception:
             # DB unavailable - fall back to file-based memory as legacy behavior
-            pass
+            self.logger.debug("DB unavailable for cortex memory; using file fallback")
 
         try:
             template_path = os.path.join(self.config.BASE_DIR, "cortex_memory.template.json")
@@ -797,7 +833,7 @@ class Cortex:
             if os.path.exists(self.config.MEMORY_FILE):
                 with open(self.config.MEMORY_FILE, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
-                    self.logger.info(f"Successfully loaded memory from {self.config.MEMORY_FILE}")
+                    self.logger.info(f"Successfully loaded memory from {self.config.MEMORY_FILE} (file fallback)")
                     return {**default_memory, **loaded}
             else:
                 self.logger.warning(
@@ -823,10 +859,9 @@ class Cortex:
         # Prefer saving memory to DB for atomic writes
         try:
             from db_manager import get_db
-
             db = get_db()
-            db.set_config("cortex_memory", json.dumps(self.memory), "Persistent cortex memory JSON")
-            self.logger.info("Successfully saved cortex memory to database (system_config:cortex_memory)")
+            db.set_cortex_memory(self.memory)
+            self.logger.info("Successfully saved cortex memory to database (cortex_memory table)")
             # Also write a file fallback asynchronously (best-effort)
             try:
                 with open(self.config.MEMORY_FILE, "w", encoding="utf-8") as f:
