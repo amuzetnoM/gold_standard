@@ -752,8 +752,25 @@ class DatabaseManager:
                     doc_type = excluded.doc_type,
                     synced_at = excluded.synced_at
             """,
-                (file_path, file_hash, page_id, url, doc_type, now),
+                (normalized_path, file_hash, page_id, url, doc_type, now),
             )
+
+            # Also update document lifecycle table to mark this file as published
+            try:
+                cursor.execute(
+                    """
+                    UPDATE document_lifecycle
+                    SET status = 'published',
+                        notion_page_id = ?,
+                        published_at = COALESCE(?, published_at),
+                        updated_at = ?
+                    WHERE file_path = ?
+                """,
+                    (page_id, now, now, normalized_path),
+                )
+            except Exception:
+                # If document_lifecycle isn't present or update fails, ignore silently
+                pass
 
             return True
 
