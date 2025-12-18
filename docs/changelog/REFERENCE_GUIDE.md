@@ -940,7 +940,7 @@ run.py --sync-all  # Journal_2025-12-05.md is now synced
 1. **Review before publishing** - Use the `review` status as a checkpoint
 2. **Batch publishing** - Review all drafts, then publish in batches
 3. **Archive old content** - Move outdated published docs to `archived`
-4. **Force sync for testing** - Use `--force` flag to bypass status checks
+4. **Force sync for testing** - `--force` remains available for CLI compatibility but should be used sparingly. Chart generation semantics were changed: charts are regenerated once per analysis run and the `--force` flag no longer overrides on-disk mtimes to force regeneration across runs. Use `--once` to run a fresh cycle and produce a complete set of charts for that run.
 
 ---
 
@@ -1068,6 +1068,7 @@ sudo journalctl -u gold-standard-executor -f
 |----------|---------|-------------|
 | `GOST_DETACHED_EXECUTOR` | `0` | Set to `1` to enable detached mode in run.py |
 | `GOST_DATA_DIR` | `/app/data` | Data directory for executor |
+| `NOTION_API_KEY` | *(none)* | Notion integration API key. The executor daemon performs a best-effort load of the repository `.env` on startup so keys defined there (e.g., `NOTION_API_KEY`, `GEMINI_API_KEY`) are available to the worker process. |
 
 ---
 
@@ -1213,7 +1214,7 @@ output/
 When running in daemon mode, the File Organizer automatically processes new files:
 
 ```bash
-python run.py --daemon --interval-min 1
+python run.py --daemon --interval-min 240
 ```
 
 ---
@@ -1601,7 +1602,7 @@ The system supports autonomous background operation:
 
 ```bash
 # Run with 1-minute intervals (default for v3.0)
-python run.py --daemon --interval-min 1
+python run.py --daemon --interval-min 240
 
 # Legacy 4-hour intervals
 python run.py --daemon --interval-hours 4
@@ -1616,7 +1617,7 @@ For automated runs, use system scheduler:
 
 ```bash
 # Cron (Unix) - Daemon mode with 1-minute intervals
-@reboot cd /path/to/gold_standard && python run.py --daemon --interval-min 1
+@reboot cd /path/to/gold_standard && python run.py --daemon --interval-min 240
 
 # Single daily run at 8 AM
 0 8 * * * cd /path/to/gold_standard && python run.py --mode daily --once
@@ -1726,7 +1727,7 @@ def get_february_2026_events(self) -> List[EconomicEvent]:
 
 ```bash
 # Daemon mode with 1-minute intervals (v3.0 default)
-python run.py --daemon --interval-min 1
+python run.py --daemon --interval-min 240
 
 # Single execution
 python run.py --mode daily --once

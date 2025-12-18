@@ -11,12 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-try:
-    import google.genai as genai_mod
-    GENAI_NEW = True
-except Exception:
-    genai_mod = None
-    GENAI_NEW = False
+genai_mod = None
+GENAI_NEW = False
 
 
 logger = logging.getLogger("genai_compat")
@@ -31,6 +27,17 @@ class _GenaiWrapper:
 
     def configure(self, api_key: str = None, **kwargs):
         self._api_key = api_key or self._api_key
+        # Lazily import the new `google.genai` client when configuring.
+        global genai_mod, GENAI_NEW
+        if not GENAI_NEW:
+            try:
+                import google.genai as genai_mod_local
+
+                genai_mod = genai_mod_local
+                GENAI_NEW = True
+            except Exception:
+                GENAI_NEW = False
+
         if GENAI_NEW and self._api_key:
             try:
                 self._client = genai_mod.Client(api_key=self._api_key, **(kwargs or {}))

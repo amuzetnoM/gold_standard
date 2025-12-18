@@ -96,25 +96,11 @@ except Exception:
     ta = _FallbackTA()
 
     ta = _FallbackTA()
-# Optional: Google Gemini (GenAI) - import lazily and handle missing package gracefully
-GENAI_AVAILABLE = False
+# Optional runtime hooks (deferred imports)
+# `genai` (Google GenAI) and `mpf` (mplfinance) are imported lazily
+# to avoid heavy startup latency during dry-runs or when providers are unused.
 genai = None
-try:
-    import google.generativeai as genai  # type: ignore
-    GENAI_AVAILABLE = True
-except Exception:
-    try:
-        # Use local compat shim that maps the new google.genai client to the old API
-        from scripts import genai_compat as genai  # type: ignore
-        GENAI_AVAILABLE = True
-    except Exception:
-        genai = None
-        GENAI_AVAILABLE = False
-
-try:
-    import mplfinance as mpf
-except Exception:
-    mpf = None
+mpf = None
 import yfinance as yf
 from colorama import init
 
@@ -140,10 +126,32 @@ class GeminiProvider(LLMProvider):
     """Google Gemini API provider."""
 
     def __init__(self, model_name: str = "models/gemini-pro-latest"):
-        if not GENAI_AVAILABLE:
-            raise RuntimeError("Gemini provider not available: google.generativeai package not installed or configured")
-        self.model = genai.GenerativeModel(model_name)
-        self.name = "Gemini"
+        # Import the Google GenAI client only when the provider is instantiated.
+        # Try the legacy `google.generativeai` package first, then the compat shim.
+        try:
+            import google.generativeai as genai_mod  # type: ignore
+            self._genai = genai_mod
+            self.model = genai_mod.GenerativeModel(model_name)
+            self.name = "Gemini"
+        except Exception:
+            try:
+                from scripts import genai_compat as genai_compat  # type: ignore
+
+                # Configure compat shim if an API key is present
+                api_key = os.getenv("GEMINI_API_KEY")
+                try:
+                    if api_key:
+                        genai_compat.configure(api_key=api_key)
+                except Exception:
+                    pass
+
+                self._genai = genai_compat
+                self.model = genai_compat.GenerativeModel(model_name)
+                self.name = "Gemini"
+            except Exception:
+                raise RuntimeError(
+                    "Gemini provider not available: google.generativeai package or compat shim not installed/configured"
+                )
 
     def generate_content(self, prompt: str) -> Any:
         return self.model.generate_content(prompt)
@@ -303,12 +311,31 @@ class FallbackLLMProvider(LLMProvider):
                 # Remove competing GOOGLE_API_KEY if present to avoid library auto-selection
                 os.environ.pop("GOOGLE_API_KEY", None)
 
-                genai.configure(api_key=config.GEMINI_API_KEY)
-                self._gemini = GeminiProvider(config.GEMINI_MODEL)
-                self._providers.append(self._gemini)
-                self._current = self._gemini
-                self.name = "Gemini"
-                logger.info(f"[LLM] ✓ Primary: Gemini ({config.GEMINI_MODEL})")
+                # Make sure the `genai` client is imported and available for configuration.
+                # Older code assumed a module-level `genai` would be present; ensure we
+                # import the official client or the compat shim before calling configure.
+                try:
+                    if globals().get("genai") is None:
+                        try:
+                            import google.generativeai as genai_mod  # type: ignore
+                            globals()["genai"] = genai_mod
+                        except Exception:
+                            try:
+                                from scripts import genai_compat as genai_compat  # type: ignore
+
+                                globals()["genai"] = genai_compat
+                            except Exception:
+                                # If neither client is importable, raise to fallback
+                                raise
+
+                    # Configure the client with the provided key
+                    globals()["genai"].configure(api_key=config.GEMINI_API_KEY)
+
+                    self._gemini = GeminiProvider(config.GEMINI_MODEL)
+                    self._providers.append(self._gemini)
+                    self._current = self._gemini
+                    self.name = "Gemini"
+                    logger.info(f"[LLM] ✓ Primary: Gemini ({config.GEMINI_MODEL})")
             except Exception as e:
                 logger.warning(f"[LLM] ✗ Gemini init failed: {e}")
                 # If strict-gemini mode enabled, do not fallback to local providers
@@ -623,7 +650,22 @@ class Config:
         default_factory=lambda: os.environ.get("PREFER_LOCAL_LLM", "").lower() in ("1", "true", "yes")
     )
     # LOCAL_LLM_GPU_LAYERS: Number of layers to offload to GPU (0=CPU, -1=all)
-    LOCAL_LLM_GPU_LAYERS: int = field(default_factory=lambda: int(os.environ.get("LOCAL_LLM_GPU_LAYERS", "0") or "0"))
+    # Use robust parsing that tolerates commented or malformed env values.
+    try:
+        from scripts.local_llm import get_env_int as _get_env_int  # type: ignore
+    except Exception:
+        def _get_env_int(key: str, default: int) -> int:
+            v = os.environ.get(key, "")
+            try:
+                return int(v) if v else default
+            except Exception:
+                # Try to extract leading integer if present
+                import re
+
+                m = re.match(r"\s*([+-]?\d+)", v or "")
+                return int(m.group(1)) if m else default
+
+    LOCAL_LLM_GPU_LAYERS: int = field(default_factory=lambda: _get_env_int("LOCAL_LLM_GPU_LAYERS", 0))
     # LOCAL_LLM_AUTO_DOWNLOAD: Auto-download a model if none found (1/true)
     LOCAL_LLM_AUTO_DOWNLOAD: bool = field(
         default_factory=lambda: os.environ.get("LOCAL_LLM_AUTO_DOWNLOAD", "").lower() in ("1", "true", "yes")
@@ -685,7 +727,7 @@ class Config:
     # Scheduling - NEW: Minutes-based for high-frequency operation
     # Default to 1-minute cycles for real-time intelligence
     RUN_INTERVAL_MINUTES: int = 1
-    RUN_INTERVAL_HOURS: int = 0  # Legacy support - set to 0 when using minutes
+    RUN_INTERVAL_HOURS: int = 4  # Default autonomous interval in hours (prefer multi-hour cycles)
 
     # Insights & Task Execution
     ENABLE_INSIGHTS_EXTRACTION: bool = True
@@ -1229,6 +1271,11 @@ class QuantEngine:
         self.config = config
         self.logger = logger
         self.news: List[str] = []
+        # Track charts generated during this QuantEngine instance (single run)
+        # Charts will only be skipped if they were already created earlier in
+        # the same run. This avoids re-using stale on-disk charts from
+        # previous runs while preventing duplicate generation within one loop.
+        self._generated_charts = set()
         # Production mode: using ASSETS defined in the source configuration
 
     def get_data(self) -> Optional[Dict[str, Any]]:
@@ -1370,20 +1417,77 @@ class QuantEngine:
                 # Calculate technical indicators safely with fallbacks
                 def safe_indicator_series(name, func, *fargs, **fkwargs):
                     try:
+                        import numpy as _np
+
                         out = func(*fargs, **fkwargs)
-                        # If a DataFrame or Series make sure it aligns with index
                         if out is None:
                             return None
-                        if isinstance(out, pd.Series):
+
+                        # If DataFrame: try to extract a sensible single column
+                        if isinstance(out, pd.DataFrame):
+                            if out.shape[1] == 1:
+                                s = out.iloc[:, 0]
+                            else:
+                                # Prefer column containing the indicator name, else first numeric column
+                                cols = [c for c in out.columns if name.upper() in str(c).upper()]
+                                if cols:
+                                    s = out[cols[0]]
+                                else:
+                                    # fall back to first column
+                                    s = out.iloc[:, 0]
+
+                        elif isinstance(out, pd.Series):
                             s = out
+
                         else:
-                            s = pd.Series(out, index=df.index)
+                            # ndarray / list / scalar
+                            try:
+                                arr = _np.asarray(out)
+                            except Exception:
+                                # last resort: build a series and try to reindex
+                                s = pd.Series(out)
+                            else:
+                                if arr.ndim == 0:
+                                    # scalar
+                                    s = pd.Series([arr[()]] * len(df), index=df.index)
+                                elif arr.ndim == 1:
+                                    if arr.size == len(df):
+                                        s = pd.Series(arr, index=df.index)
+                                    elif 0 < arr.size < len(df):
+                                        # right-align shorter result to the tail of df
+                                        idx = df.index[-arr.size:]
+                                        s = pd.Series(arr, index=idx)
+                                        s = s.reindex(df.index)
+                                    else:
+                                        # unexpected length; coerce to series and attempt reindex
+                                        s = pd.Series(arr)
+                                else:
+                                    # multi-dim: take first column and try to align
+                                    first_col = arr[:, 0]
+                                    if first_col.size == len(df):
+                                        s = pd.Series(first_col, index=df.index)
+                                    elif 0 < first_col.size < len(df):
+                                        idx = df.index[-first_col.size:]
+                                        s = pd.Series(first_col, index=idx)
+                                        s = s.reindex(df.index)
+                                    else:
+                                        s = pd.Series(first_col)
+
+                        # Final alignment: ensure series index matches df index length
+                        try:
+                            if len(s) != len(df):
+                                s = s.reindex(df.index)
+                        except Exception:
+                            pass
+
                         if len(s) != len(df):
                             self.logger.warning(
                                 f"Indicator {name} returned {len(s)} values for {ticker} but df has {len(df)} index; ignoring {name}"
                             )
                             return None
-                        return s
+
+                        # Ensure numeric dtype
+                        return pd.to_numeric(s, errors="coerce")
                     except Exception as e:
                         self.logger.warning(f"Safe indicator {name} failed for {ticker}: {e}")
                         return None
@@ -1518,31 +1622,15 @@ class QuantEngine:
     def _chart(self, name: str, df: pd.DataFrame) -> None:
         """Generate candlestick chart with technical overlays."""
         try:
-            # Quick cache check: skip generating chart if an up-to-date chart exists
-            try:
-                chart_path = os.path.join(self.config.CHARTS_DIR, f"{name}.png")
-                # Determine latest data timestamp from dataframe index
-                last_index = df.index[-1]
-                try:
-                    last_ts = float(getattr(last_index, "timestamp", lambda: None)())
-                except Exception:
-                    # Pandas timestamp fallback
-                    try:
-                        last_ts = float(pd.to_datetime(last_index).astype(int) / 1e9)
-                    except Exception:
-                        last_ts = None
+            # Determine chart path
+            chart_path = os.path.join(self.config.CHARTS_DIR, f"{name}.png")
 
-                if last_ts and os.path.exists(chart_path):
-                    try:
-                        mtime = os.path.getmtime(chart_path)
-                        if mtime >= last_ts:
-                            self.logger.info(f"Chart up-to-date, skipping generation: {chart_path}")
-                            return
-                    except Exception:
-                        pass
-            except Exception:
-                # If any of the cache checks fail, proceed to generate chart
-                pass
+            # Only skip generation if this chart was already produced earlier
+            # during the same run. Do NOT rely on on-disk mtimes from previous
+            # runs — we want each run to produce a fresh, consistent set.
+            if name in getattr(self, "_generated_charts", set()):
+                self.logger.info(f"Chart already generated in this run, skipping: {chart_path}")
+                return
             # Prepare additional plots
             # Prefer columns if precomputed by _fetch; else compute safely
             def safe_sma(series, length):
@@ -1584,25 +1672,56 @@ class QuantEngine:
                 sma50_plot = sma50.reindex(plot_df.index)
             if sma200 is not None:
                 sma200_plot = sma200.reindex(plot_df.index)
-            if sma50_plot is not None and hasattr(sma50_plot, "isna") and not sma50_plot.isna().all():
-                apds.append(mpf.make_addplot(sma50_plot, color="orange", width=1))
-            if sma200_plot is not None and hasattr(sma200_plot, "isna") and not sma200_plot.isna().all():
-                apds.append(mpf.make_addplot(sma200_plot, color="blue", width=1))
+            # Build addplot dataframes but defer calling `mpf.make_addplot` until
+            # mplfinance is imported (below). This avoids calling into mpf at
+            # module-import time.
+            # `apds` remains an array of mpl addplots after the import stage.
 
-            style = mpf.make_mpf_style(base_mpf_style="nightclouds", rc={"font.size": 8})
-            chart_path = os.path.join(self.config.CHARTS_DIR, f"{name}.png")
+            # Ensure mpl/mplfinance are imported with a headless backend
+            try:
+                if mpf is None:
+                    import matplotlib
 
-            plot_kwargs = {
-                "type": "candle",
-                "volume": False,
-                "style": style,
-                "title": f"{name} Quant View",
-                "savefig": chart_path,
-            }
+                    # Respect `MPLBACKEND` env var when provided, default to Agg
+                    matplotlib.use(os.environ.get("MPLBACKEND", "Agg"))
+                    import mplfinance as mpf_mod
 
-            if apds:
-                plot_kwargs["addplot"] = apds
-            mpf.plot(plot_df, **plot_kwargs)
+                    # bind local mpf for subsequent calls in this process
+                    globals()["mpf"] = mpf_mod
+
+                mpf_local = globals().get("mpf")
+                if mpf_local is None:
+                    raise RuntimeError("mplfinance not available after import attempt")
+
+                # Build addplots now that mpf_local is available
+                apds = []
+                if sma50_plot is not None and hasattr(sma50_plot, "isna") and not sma50_plot.isna().all():
+                    apds.append(mpf_local.make_addplot(sma50_plot, color="orange", width=1))
+                if sma200_plot is not None and hasattr(sma200_plot, "isna") and not sma200_plot.isna().all():
+                    apds.append(mpf_local.make_addplot(sma200_plot, color="blue", width=1))
+
+                style = mpf_local.make_mpf_style(base_mpf_style="nightclouds", rc={"font.size": 8})
+                chart_path = os.path.join(self.config.CHARTS_DIR, f"{name}.png")
+
+                plot_kwargs = {
+                    "type": "candle",
+                    "volume": False,
+                    "style": style,
+                    "title": f"{name} Quant View",
+                    "savefig": chart_path,
+                }
+
+                if apds:
+                    plot_kwargs["addplot"] = apds
+                mpf_local.plot(plot_df, **plot_kwargs)
+                # Mark as generated for this run so subsequent calls in the
+                # same execution loop don't regenerate the same chart.
+                try:
+                    self._generated_charts.add(name)
+                except Exception:
+                    pass
+            except Exception as e:
+                self.logger.warning(f"Skipping chart generation (mplfinance unavailable or failed): {e}")
             # ensure chart was actually written
             ok = False
             try:
@@ -1901,7 +2020,12 @@ Entry Conditions:
 # EXECUTION LOOP
 # ==========================================
 def execute(
-    config: Config, logger: logging.Logger, model: Optional[Any] = None, dry_run: bool = False, no_ai: bool = False
+    config: Config,
+    logger: logging.Logger,
+    model: Optional[Any] = None,
+    dry_run: bool = False,
+    no_ai: bool = False,
+    force: bool = False,
 ) -> bool:
     """
     Execute one analysis cycle.
@@ -1917,6 +2041,9 @@ def execute(
     # Initialize components
     cortex = Cortex(config, logger)
     quant = QuantEngine(config, logger)
+    # The legacy `force` flag is no longer used. Chart generation skips only
+    # duplicate charts produced earlier in the same run; on-disk charts from
+    # previous runs do not prevent fresh generation in a new run.
 
     # 1. Get Market Data
     data = quant.get_data()
@@ -2081,6 +2208,7 @@ def main() -> None:
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
     parser.add_argument("--dry-run", action="store_true", help="Run without writing memory/report")
     parser.add_argument("--no-ai", action="store_true", help="Do not call AI, produce a skeleton report")
+    parser.add_argument("--force", "-f", action="store_true", help="Force regenerate charts and re-run expensive steps")
     parser.add_argument("--interval", type=int, default=None, help="Override run interval hours")
     parser.add_argument("--log-level", default="INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR)")
     parser.add_argument("--gemini-key", default=None, help="Override GEMINI API key via CLI (not recommended)")
@@ -2109,11 +2237,11 @@ def main() -> None:
                 model_obj = provider
                 logger.info(f"LLM provider available: {provider.name}")
             else:
-                logger.error("No LLM provider available and --no-ai not set. Use --no-ai or configure an LLM provider.")
-                sys.exit(1)
+                logger.warning("No LLM provider available; continuing without AI. Use --no-ai to suppress this message or configure an LLM provider.")
+                model_obj = None
         except Exception as e:
-            logger.error(f"Failed to initialize LLM providers: {e}")
-            sys.exit(1)
+            logger.warning(f"Failed to initialize LLM providers: {e}. Continuing without AI.")
+            model_obj = None
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
@@ -2130,7 +2258,7 @@ def main() -> None:
         logger.info("Press Ctrl+C to shutdown gracefully")
 
     # Execute immediately
-    execute(config, logger, model=model_obj, dry_run=args.dry_run, no_ai=args.no_ai)
+    execute(config, logger, model=model_obj, dry_run=args.dry_run, no_ai=args.no_ai, force=args.force)
 
     # If --once, we exit now
     if args.once:
@@ -2138,7 +2266,9 @@ def main() -> None:
         return
 
     # Schedule recurring execution
-    schedule.every(config.RUN_INTERVAL_HOURS).hours.do(execute, config, logger, model_obj, args.dry_run, args.no_ai)
+    schedule.every(config.RUN_INTERVAL_HOURS).hours.do(
+        execute, config, logger, model_obj, args.dry_run, args.no_ai, args.force
+    )
 
     # Main loop with graceful shutdown
     while not shutdown_requested:

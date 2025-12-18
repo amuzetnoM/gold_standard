@@ -56,11 +56,14 @@ except ImportError:
 # Backend 3: Ollama (requires ollama server running)
 try:
     import requests
-
-    # Check if Ollama is running
-    _ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    _resp = requests.get(f"{_ollama_url}/api/tags", timeout=2)
-    HAS_OLLAMA = _resp.status_code == 200
+    # Check if Ollama is explicitly disabled via env
+    _ollama_disabled = get_env_bool("OLLAMA_DISABLE") or get_env_bool("DISABLE_OLLAMA")
+    if _ollama_disabled:
+        HAS_OLLAMA = False
+    else:
+        _ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+        ping_timeout = int(os.environ.get("OLLAMA_PING_TIMEOUT_S", "2"))
+        HAS_OLLAMA = is_ollama_reachable(_ollama_url, timeout_s=ping_timeout)
 except Exception:
     HAS_OLLAMA = False
 
@@ -113,6 +116,20 @@ def get_env_bool(key: str, default: bool = False) -> bool:
     if val in ("0", "false", "no", "off"):
         return False
     return default
+
+
+def is_ollama_reachable(host: str, timeout_s: int = 2) -> bool:
+    """Quick check whether an Ollama server is reachable.
+
+    Returns True if a GET to /api/tags returns 200 within timeout.
+    """
+    try:
+        import requests
+
+        resp = requests.get(f"{host.rstrip('/')}/api/tags", timeout=timeout_s)
+        return resp.status_code == 200
+    except Exception:
+        return False
 
 
 @dataclass
@@ -577,12 +594,25 @@ class OllamaLLM:
         self._available = False
         self._loaded_model = None
 
-        # Check connection
+        # Respect explicit disable flag
+        if get_env_bool("OLLAMA_DISABLE") or get_env_bool("DISABLE_OLLAMA"):
+            print("[Ollama] Disabled via environment (OLLAMA_DISABLE).")
+            self._available = False
+            return
+
+        # Quick ping check to avoid long retries when host is down
+        ping_timeout = int(os.environ.get("OLLAMA_PING_TIMEOUT_S", "2"))
+        if not is_ollama_reachable(self._host, timeout_s=ping_timeout):
+            print(f"[Ollama] Host not reachable at {self._host} (ping timeout {ping_timeout}s). Skipping Ollama provider.")
+            self._available = False
+            return
+
+        # Host appears reachable; perform a short listing to get installed models
         try:
             import requests
 
-            timeout = int(os.environ.get("OLLAMA_TIMEOUT_S", "10"))
-            resp = requests.get(f"{self._host}/api/tags", timeout=timeout)
+            list_timeout = int(os.environ.get("OLLAMA_LIST_TIMEOUT_S", "5"))
+            resp = requests.get(f"{self._host}/api/tags", timeout=list_timeout)
             if resp.status_code == 200:
                 self._available = True
                 models = resp.json().get("models", [])
@@ -591,7 +621,8 @@ class OllamaLLM:
                 if any(self._model in m for m in self._installed_models):
                     self._loaded_model = self._model
         except Exception as e:
-            print(f"[Ollama] Connection failed: {e}")
+            print(f"[Ollama] Listing models failed: {e}")
+            self._available = False
 
     @property
     def is_available(self) -> bool:

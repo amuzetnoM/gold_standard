@@ -1134,6 +1134,7 @@ def main():
         epilog="""
 Examples:
   python run.py                  # Autonomous daemon mode (1-minute cycles)
+    python run.py --once           # Single run and exit
   python run.py --once           # Single run and exit
   python run.py --run            # Run all analysis once
   python run.py --interval-min 5 # Daemon with 5-minute interval
@@ -1154,7 +1155,7 @@ Examples:
     parser.add_argument(
         "--interval", type=int, default=0, help="Hours between daemon runs (legacy, default: 0 = use minutes)"
     )
-    parser.add_argument("--interval-min", type=int, default=1, help="Minutes between daemon runs (default: 1)")
+    parser.add_argument("--interval-min", type=int, default=240, help="Minutes between daemon runs (default: 240 -> 4 hours)")
 
     # Feature toggles
     parser.add_argument(

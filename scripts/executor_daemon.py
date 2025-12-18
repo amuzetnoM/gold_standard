@@ -55,6 +55,14 @@ from typing import Any, Dict, Optional
 # Project root
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+try:
+    # Ensure environment variables from repo `.env` are available to the daemon
+    from dotenv import load_dotenv
+
+    load_dotenv(str(PROJECT_ROOT / ".env"))
+except Exception:
+    # Best-effort: continue if dotenv isn't installed or .env missing
+    pass
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -547,32 +555,18 @@ class ExecutorDaemon:
             time.sleep(HEARTBEAT_INTERVAL_SECONDS)
 
     def _start_heartbeat(self):
-            try:
-                from flask import Flask, jsonify
-
-                app = Flask(__name__)
-
-                @app.route("/health")
-                def health():
-                    return jsonify({"status": "ok"}), 200
-
-                @app.route("/metrics")
-                def metrics():
-                    try:
-                        from scripts.metrics import expose_metrics
-
-                        return expose_metrics(), 200, {"Content-Type": "text/plain; version=0.0.4; charset=utf-8"}
-                    except Exception:
-                        return "", 500
-
-                threading.Thread(target=lambda: app.run(host="0.0.0.0", port=self.http_port, debug=False, use_reloader=False), daemon=True).start()
-                self.logger.info(f"Executor daemon HTTP health endpoint listening on :{self.http_port}")
-            except Exception as e:
-                self.logger.debug(f"HTTP health endpoint not available: {e}")
+        """
+        Start the heartbeat background thread which periodically updates
+        executor heartbeat metadata in the DB. Keep implementation simple
+        to avoid optional Flask/web dependencies in the daemon core.
+        """
+        try:
+            t = threading.Thread(target=self._heartbeat_loop, daemon=True)
             t.start()
-            self.logger.info(f"HTTP health endpoint available at http://{host}:{port}/health")
-        except Exception:
-            self.logger.debug("Flask not available or failed to start health endpoint; skipping HTTP health server")
+            self._heartbeat_thread = t
+            self.logger.info("Executor heartbeat thread started")
+        except Exception as e:
+            self.logger.debug(f"Failed to start heartbeat thread: {e}")
 
     def _attempt_leader_election(self, ttl_seconds: int = 120) -> bool:
         """Try to become the leader by writing to system_config if empty or stale."""

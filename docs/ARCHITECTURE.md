@@ -565,7 +565,7 @@ python scripts\download_models.py --download
 - "Visual Studio not found": run `winget install Microsoft.VisualStudio.2022.BuildTools`
 
 ## Recent changes (session highlights)
-- **Daemon interval reduced to 1 minute** (configurable via --interval-min)
+- **Default daemon interval set to 4 hours** (configurable via `--interval-min`)
 - **Entity Insights extraction** - auto-identifies key entities in reports
 - **Action Insights extraction** - identifies actionable tasks from reports
 - **Task Executor** - autonomously executes pending tasks before next cycle

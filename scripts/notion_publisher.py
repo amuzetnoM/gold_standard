@@ -620,7 +620,11 @@ class NotionPublisher:
                 db = get_db()
                 # Release stale in_progress claims before checking/claiming
                 try:
-                    db.release_stale_claims(900)
+                    ttl = int(os.environ.get("DOCUMENT_CLAIM_TTL", "900"))
+                except Exception:
+                    ttl = 900
+                try:
+                    db.release_stale_claims(ttl)
                 except Exception:
                     pass
                 file_hash = db.get_file_hash(normalized_path)

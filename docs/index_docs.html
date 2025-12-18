@@ -605,7 +605,7 @@
 
                 <h3>Key Capabilities</h3>
                 <ul>
-                    <li><strong>Autonomous Operation</strong> &#8212; Daemon mode with configurable intervals from 1 minute to hours</li>
+                    <li><strong>Autonomous Operation</strong> &#8212; Daemon mode with configurable intervals (default: 4 hours)</li>
                     <li><strong>Multi-Asset Analysis</strong> &#8212; Gold, Silver, DXY, 10Y Yields, VIX, S&amp;P 500</li>
                     <li><strong>Technical Indicators</strong> &#8212; RSI, ADX, Bollinger Bands, SMA/EMA via pandas_ta</li>
                     <li><strong>AI Integration</strong> &#8212; Gemini, Ollama, llama.cpp with automatic fallback</li>
@@ -650,7 +650,7 @@ LLM_PROVIDER=gemini             # gemini, ollama, or local</code></pre>
 
                 <h3>Start Autonomous Daemon</h3>
                 <pre><code>python run.py</code></pre>
-                <p>Runs continuous analysis every 1 minute. Press Ctrl+C to stop gracefully.</p>
+                <p>Runs continuous analysis according to `RUN_INTERVAL_HOURS` (default: 4 hours). Press Ctrl+C to stop gracefully.</p>
 
                 <h3>Single Analysis Run</h3>
                 <pre><code>python run.py --once</code></pre>

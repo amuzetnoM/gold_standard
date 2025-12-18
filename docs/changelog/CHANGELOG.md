@@ -1,6 +1,6 @@
 # ACTIVE DEVELOPMENT
 
-[![Version](https://img.shields.io/badge/version-3.5.0-blue.svg)](https://github.com/amuzetnoM/gold_standard/releases)
+[![Version](https://img.shields.io/badge/version-3.5.1-blue.svg)](https://github.com/amuzetnoM/gold_standard/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](https://ghcr.io/amuzetnom/gold_standard)
@@ -12,6 +12,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ---
 
 ### HIGHLIGHTS
+
+> Version 3.5.1 Patch (2025-12-18)
+
+Patch Summary: Production hardening, deterministic per-run chart generation, Notion daemon env-loading, and documentation updates.
+
+Key fixes and improvements:
+- **Chart generation semantics:** Charts are now generated once per analysis run and subsequent chart calls in the same run will be skipped only if they were already produced during that run. This prevents stale on-disk charts from previous runs being treated as fresh while avoiding duplicate generation within a single loop.
+- **`--force` behavior neutralized for charts:** The legacy force flag no longer overrides on-disk mtimes for chart caching. The flag is retained for CLI compatibility but is inert with respect to chart caching. Recommend avoiding relying on `--force` to bypass cache in production.
+- **Executor daemon environment loading:** The detached executor now loads the repository `.env` on startup (best-effort) so `NOTION_API_KEY`, `GEMINI_API_KEY`, and other keys are available to the worker process.
+- **Notion publishing reliability:** Removed test Notion DB variable and fixed lifecycle registration so Notion keys are loaded from `.env` by the daemon.
+- **Indicator & plotting hardening:** Continued improvements to indicator normalization (`safe_indicator_series`) and headless plotting defaults to ensure reliable offline runs.
+- **Docs & changelog:** Updated documentation and changelog to reflect the behavioral changes and recommended operator actions.
 
 > Version 3.5.0 Release (2025-12-14)
 

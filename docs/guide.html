@@ -1532,8 +1532,8 @@ pytest tests/test_gemini.py -v</code></pre>
 
                 <h3>Daemon Mode</h3>
                 <p>The system supports autonomous background operation:</p>
-                <pre><code># Run with 1-minute intervals
-python run.py --daemon --interval-min 1
+                <pre><code># Run with 4-hour intervals (default)
+python run.py --daemon --interval-min 240
 
 # Single daily run
 python run.py --mode daily --once</code></pre>
@@ -1541,7 +1541,7 @@ python run.py --mode daily --once</code></pre>
                 <h3>Scheduling</h3>
                 <p>For automated runs, use system scheduler:</p>
                 <pre><code># Cron (Unix) - Daemon mode
-@reboot cd /path/to/gold_standard && python run.py --daemon --interval-min 1
+@reboot cd /path/to/gold_standard && python run.py --daemon --interval-min 240
 
 # Single daily run at 8 AM
 0 8 * * * cd /path/to/gold_standard && python run.py --mode daily --once</code></pre>

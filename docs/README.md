@@ -12,7 +12,7 @@
 ```
 
 # Gold Standard
-*version 3.5.0* | *stable: 3.4.0* | [CHANGELOG](https://artifact-virtual.gitbook.io/gold-standard)
+*version 3.5.1* | *stable: 3.4.0* | [CHANGELOG](https://artifact-virtual.gitbook.io/gold-standard)
 
 ![FUCK IT · SHIP IT](https://img.shields.io/badge/FUCK%20IT-SHIP%20IT-2f2f2f?style=for-the-badge&labelColor=6f42c1&logoColor=white)
 
@@ -197,12 +197,12 @@ python gui.py
 
 ### CLI Interface
 
-The unified CLI (`run.py`) runs as an autonomous daemon by default with 1-minute cycles.
+The unified CLI (`run.py`) runs as an autonomous daemon by default. The analysis interval is configurable via `RUN_INTERVAL_HOURS` (default: 4 hours) or the CLI `--interval-min` / `--interval` flags.
 
 #### Autonomous Daemon Mode (Default)
 
 ```powershell
-# Start autonomous daemon - runs analysis every 1 minute
+# Start autonomous daemon - runs analysis according to `RUN_INTERVAL_HOURS` (default: 4 hours)
 python run.py
 
 # Custom interval in minutes (5 minutes)
@@ -259,7 +259,7 @@ Enter choice (0-4):
 
 | Command | Description |
 |---------|-------------|
-| `python run.py` | **Autonomous daemon** - runs every 1 minute (default) |
+| `python run.py` | **Autonomous daemon** - runs according to `RUN_INTERVAL_HOURS` (default: 4 hours) |
 | `python run.py --interval-min 5` | Daemon with 5-minute interval |
 | `python run.py --interval 2` | Daemon with 2-hour interval (legacy) |
 | `python run.py --once` | Single run and exit |

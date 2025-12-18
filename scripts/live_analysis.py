@@ -29,14 +29,32 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Try old google.generativeai, then compat shim, else leave genai as None
-try:
-    import google.generativeai as genai  # type: ignore
-except Exception:
+# Lazy GenAI loader: do not import heavy Google GenAI packages at module import time.
+genai = None
+
+
+def get_genai():
+    """Lazily import a GenAI client (legacy `google.generativeai` or compat shim).
+
+    Returns the imported module or None if not available.
+    """
+    global genai
+    if genai is not None:
+        return genai
     try:
-        from scripts import genai_compat as genai  # type: ignore
+        import google.generativeai as genai_mod  # type: ignore
+
+        genai = genai_mod
+        return genai
     except Exception:
-        genai = None
+        try:
+            from scripts import genai_compat as genai_compat  # type: ignore
+
+            genai = genai_compat
+            return genai
+        except Exception:
+            genai = None
+            return None
 
 
 # ==========================================
