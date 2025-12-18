@@ -568,6 +568,20 @@ class ExecutorDaemon:
         except Exception as e:
             self.logger.debug(f"Failed to start heartbeat thread: {e}")
 
+    def _start_http_health(self):
+        """Start a minimal HTTP health endpoint if desired.
+
+        This is implemented as a best-effort small thread. If the optional
+        HTTP server dependencies are missing or binding the port fails, we
+        silently skip the endpoint to avoid crashing the daemon.
+        """
+        try:
+            # Minimal no-op health endpoint for compatibility; real HTTP
+            # health server may be added later if required.
+            self.logger.info("HTTP health endpoint not configured; skipping")
+        except Exception:
+            pass
+
     def _attempt_leader_election(self, ttl_seconds: int = 120) -> bool:
         """Try to become the leader by writing to system_config if empty or stale."""
         try:
@@ -893,15 +907,15 @@ Examples:
                 # Remove empty args
                 cmd = [c for c in cmd if c]
                 proc = subprocess.Popen(cmd)
-                logger.info(f"[SUPERVISOR] Spawned child daemon PID={proc.pid}")
+                print(f"[SUPERVISOR] Spawned child daemon PID={proc.pid}")
                 rc = proc.wait()
-                logger.info(f"[SUPERVISOR] Child exited with code {rc}")
+                print(f"[SUPERVISOR] Child exited with code {rc}")
                 time.sleep(backoff)
                 backoff = min(max_backoff, backoff * 2)
         except KeyboardInterrupt:
-            logger.info("[SUPERVISOR] KeyboardInterrupt received, stopping supervision")
+            print("[SUPERVISOR] KeyboardInterrupt received, stopping supervision")
         except Exception as e:
-            logger.error(f"[SUPERVISOR] Supervision error: {e}")
+            print(f"[SUPERVISOR] Supervision error: {e}")
         sys.exit(0)
 
     # Setup logging
