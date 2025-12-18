@@ -618,6 +618,11 @@ class NotionPublisher:
         if DB_AVAILABLE:
             try:
                 db = get_db()
+                # Release stale in_progress claims before checking/claiming
+                try:
+                    db.release_stale_claims(900)
+                except Exception:
+                    pass
                 file_hash = db.get_file_hash(normalized_path)
                 # Check document lifecycle to avoid duplicate publishes
                 doc = db.get_document_status(normalized_path)

@@ -1266,6 +1266,31 @@ class DatabaseManager:
                 "last_journal": date_range["last"],
             }
 
+        def release_stale_claims(self, ttl_seconds: int = 900) -> int:
+            """
+            Release stale 'in_progress' document claims older than `ttl_seconds`.
+
+            Returns the number of rows updated.
+            """
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # Compute threshold in UNIX epoch seconds
+                try:
+                    cursor.execute(
+                        """
+                        UPDATE document_lifecycle
+                        SET status = 'draft',
+                            updated_at = CURRENT_TIMESTAMP,
+                            version = version + 1
+                        WHERE status = 'in_progress'
+                          AND (strftime('%s', 'now') - strftime('%s', updated_at)) > ?
+                    """,
+                        (ttl_seconds,)
+                    )
+                    return cursor.rowcount
+                except Exception:
+                    return 0
+
     # ==========================================
     # ENTITY INSIGHTS METHODS
     # ==========================================
