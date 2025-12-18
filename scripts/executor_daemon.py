@@ -547,28 +547,28 @@ class ExecutorDaemon:
             time.sleep(HEARTBEAT_INTERVAL_SECONDS)
 
     def _start_heartbeat(self):
-        """Start heartbeat background thread."""
-        self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
-        self._heartbeat_thread.start()
+            try:
+                from flask import Flask, jsonify
 
-    def _start_http_health(self, host: str = "127.0.0.1", port: int = 8001):
-        """Start a simple Flask HTTP health endpoint in a background thread (best-effort)."""
-        try:
-            from flask import Flask, jsonify
+                app = Flask(__name__)
 
-            app = Flask(__name__)
+                @app.route("/health")
+                def health():
+                    return jsonify({"status": "ok"}), 200
 
-            @app.route("/health")
-            def health():
-                return jsonify(self.health_check())
+                @app.route("/metrics")
+                def metrics():
+                    try:
+                        from scripts.metrics import expose_metrics
 
-            def run_app():
-                try:
-                    app.run(host=host, port=port, debug=False, use_reloader=False)
-                except Exception as e:
-                    self.logger.debug(f"Health server error: {e}")
+                        return expose_metrics(), 200, {"Content-Type": "text/plain; version=0.0.4; charset=utf-8"}
+                    except Exception:
+                        return "", 500
 
-            t = threading.Thread(target=run_app, daemon=True)
+                threading.Thread(target=lambda: app.run(host="0.0.0.0", port=self.http_port, debug=False, use_reloader=False), daemon=True).start()
+                self.logger.info(f"Executor daemon HTTP health endpoint listening on :{self.http_port}")
+            except Exception as e:
+                self.logger.debug(f"HTTP health endpoint not available: {e}")
             t.start()
             self.logger.info(f"HTTP health endpoint available at http://{host}:{port}/health")
         except Exception:

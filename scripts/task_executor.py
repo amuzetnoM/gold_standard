@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from time import perf_counter
 
 # Project paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -142,8 +143,34 @@ class TaskExecutor:
             "notion_published": 0,
         }
 
+        # Metrics (prometheus) - lazy import to avoid hard dependency
+        try:
+            from scripts import metrics
+
+            self._metrics = metrics
+        except Exception:
+            self._metrics = None
+
         # Notion publisher (lazy loaded)
         self._notion_publisher = None
+        # If no model provided, try to initialize the real Ollama provider for local task execution
+        if not self.model:
+            try:
+                from main import OllamaProvider
+
+                cfg = config
+                try:
+                    oll = OllamaProvider(model=cfg.OLLAMA_MODEL)
+                    if getattr(oll, "is_available", False):
+                        self.model = oll
+                        self.logger.info("[EXECUTOR] Using Ollama provider for task execution (local)")
+                    else:
+                        self.logger.info("[EXECUTOR] Ollama provider detected but not available")
+                except Exception as e:
+                    self.logger.debug(f"[EXECUTOR] Ollama provider init failed: {e}")
+            except Exception:
+                # Ollama not importable; continue without model
+                pass
 
     def _get_notion_publisher(self):
         """Lazy load Notion publisher."""
@@ -347,8 +374,20 @@ class TaskExecutor:
                 results.append(result)
                 self.stats["total_executed"] += 1
                 self.stats["total_time_ms"] += result.execution_time_ms
+                if self._metrics:
+                    try:
+                        self._metrics.executor_tasks_total.inc()
+                        self._metrics.executor_task_duration_seconds.observe(result.execution_time_ms / 1000.0)
+                    except Exception:
+                        pass
+
                 if result.success:
                     self.stats["successful"] += 1
+                    if self._metrics:
+                        try:
+                            self._metrics.executor_tasks_succeeded.inc()
+                        except Exception:
+                            pass
                     try:
                         self.insights_extractor.mark_action_complete(
                             action.action_id,
@@ -369,6 +408,11 @@ class TaskExecutor:
                                 self.logger.debug(f"Failed to publish artifact: {artifact_path}")
                 else:
                     self.stats["failed"] += 1
+                    if self._metrics:
+                        try:
+                            self._metrics.executor_tasks_failed.inc()
+                        except Exception:
+                            pass
                     try:
                         self.insights_extractor.mark_action_failed(action.action_id, result.error_message)
                     except Exception:

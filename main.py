@@ -122,6 +122,12 @@ from colorama import init
 # LLM PROVIDER ABSTRACTION
 # ==========================================
 
+# Load .env early so credentials in the repo are available for provider init
+try:
+    load_dotenv()
+except Exception:
+    pass
+
 
 class LLMProvider:
     """Abstract interface for LLM providers (Gemini, Local, etc.)"""
@@ -288,6 +294,15 @@ class FallbackLLMProvider(LLMProvider):
         # 1. Gemini (primary)
         if config.GEMINI_API_KEY:
             try:
+                # Ensure the GEMINI_API_KEY originates from the repo `Config` and
+                # prevent other environment values (e.g., GOOGLE_API_KEY) from taking precedence.
+                try:
+                    os.environ["GEMINI_API_KEY"] = config.GEMINI_API_KEY
+                except Exception:
+                    pass
+                # Remove competing GOOGLE_API_KEY if present to avoid library auto-selection
+                os.environ.pop("GOOGLE_API_KEY", None)
+
                 genai.configure(api_key=config.GEMINI_API_KEY)
                 self._gemini = GeminiProvider(config.GEMINI_MODEL)
                 self._providers.append(self._gemini)
@@ -296,7 +311,10 @@ class FallbackLLMProvider(LLMProvider):
                 logger.info(f"[LLM] ✓ Primary: Gemini ({config.GEMINI_MODEL})")
             except Exception as e:
                 logger.warning(f"[LLM] ✗ Gemini init failed: {e}")
-
+                # If strict-gemini mode enabled, do not fallback to local providers
+                if os.environ.get("LLM_STRICT_GEMINI", "0") == "1":
+                    logger.error("[LLM] STRICT GEMINI MODE: aborting due to Gemini init failure and no fallbacks allowed")
+                    raise
         # 2. Ollama (fallback 1)
         self._try_init_ollama(config, logger)
 
@@ -555,24 +573,29 @@ def _extract_usage_from_response(resp: Any) -> tuple[int, float]:
     tokens = 0
     cost = 0.0
     try:
-        # If response is an object with .metadata or .usage
-        if hasattr(resp, "metadata") and isinstance(resp.metadata, dict):
-            meta = resp.metadata
-            tokens = int(meta.get("tokens", meta.get("tokenCount", 0)) or 0)
-            cost = float(meta.get("cost", 0.0) or 0.0)
-        elif isinstance(resp, dict):
-            meta = resp.get("usage") or resp.get("metadata") or {}
-            if isinstance(meta, dict):
-                tokens = int(meta.get("total_tokens", meta.get("tokens", 0)) or 0)
-                cost = float(meta.get("cost", 0.0) or 0.0)
-        else:
-            # Some providers return a plain object with attributes
-            if hasattr(resp, "usage"):
-                usage = getattr(resp, "usage")
-                if isinstance(usage, dict):
-                    tokens = int(usage.get("total_tokens", 0) or 0)
-            if hasattr(resp, "token_usage"):
-                tokens = int(getattr(resp, "token_usage") or 0)
+        # Prefer provider-specific parsers for accurate metrics
+        try:
+            from scripts.llm_adapters import parse_gemini_usage, parse_ollama_usage, parse_generic_usage
+        except Exception:
+            parse_gemini_usage = parse_ollama_usage = parse_generic_usage = None
+
+        # If provider is Gemini-like
+        if parse_gemini_usage is not None:
+            t, c = parse_gemini_usage(resp)
+            if t or c:
+                return t, c
+
+        # If provider is Ollama-like
+        if parse_ollama_usage is not None:
+            t, c = parse_ollama_usage(resp)
+            if t or c:
+                return t, c
+
+        # Fallback generic parser
+        if parse_generic_usage is not None:
+            t, c = parse_generic_usage(resp)
+            tokens = int(t or 0)
+            cost = float(c or 0.0)
     except Exception:
         pass
     return tokens, cost
@@ -700,48 +723,25 @@ def setup_logging(config: Config) -> logging.Logger:
     if logger.handlers:
         return logger
 
-    # Console handler with colors and right-aligned timestamp
+    # Console handler with unified formatting using scripts.console_ui
     try:
-        from colorama import Fore, Style, init as _colorama_init
-        _colorama_init(autoreset=True)
+        from scripts.console_ui import format_log_message
 
-        class RightTimeColoredFormatter(logging.Formatter):
-            LEVEL_COLORS = {
-                "DEBUG": Fore.CYAN,
-                "INFO": Fore.GREEN,
-                "WARNING": Fore.YELLOW,
-                "ERROR": Fore.RED,
-                "CRITICAL": Fore.MAGENTA,
-            }
-
-            def __init__(self):
-                super().__init__(fmt="%(levelname)-8s | %(message)s")
-
+        class ConsoleFormatter(logging.Formatter):
             def format(self, record: logging.LogRecord) -> str:
                 level = record.levelname
-                color = self.LEVEL_COLORS.get(level, "")
-                base = super().format(record)
+                module = record.name
+                msg = super().format(record)
                 try:
-                    cols = shutil.get_terminal_size((80, 20)).columns
+                    return format_log_message(level, msg, module)
                 except Exception:
-                    cols = 80
-
-                timestr = self.formatTime(record, datefmt="%Y-%m-%d %H:%M:%S")
-                pad = max(2, cols - len(self._strip_ansi(base)) - len(timestr))
-                return f"{color}{base}{Style.RESET_ALL}{' ' * pad}{Fore.WHITE}{timestr}{Style.RESET_ALL}"
-
-            def _strip_ansi(self, s: str) -> str:
-                import re
-
-                ansi = re.compile(r"\x1b\[[0-9;]*m")
-                return ansi.sub("", s)
+                    return msg
 
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(RightTimeColoredFormatter())
+        console_handler.setFormatter(ConsoleFormatter("%(message)s"))
         logger.addHandler(console_handler)
     except Exception:
-        # Fallback to plain formatter if colorama missing
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
         console_format = logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
@@ -2074,7 +2074,7 @@ def main() -> None:
     global shutdown_requested
 
     # Load environment from .env (optional)
-    load_dotenv()
+    # (Already loaded at module import time)
 
     # Parse CLI arguments
     parser = argparse.ArgumentParser(description="Gold Standard Quant Analysis")
@@ -2100,34 +2100,34 @@ def main() -> None:
     # Adjust log level from CLI
     logger.setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
 
-    # Validate API key unless --no-ai is set
-    if not args.no_ai:
-        if args.gemini_key:
-            config.GEMINI_API_KEY = args.gemini_key
-        if not config.GEMINI_API_KEY:
-            logger.error("GEMINI_API_KEY environment variable not set and no CLI key provided!")
-            logger.error("Please set GEMINI_API_KEY environment variable or provide --gemini-key.")
-            logger.warning("Example: $env:GEMINI_API_KEY = 'your-api-key-here' or use --gemini-key option")
-            sys.exit(1)
-
-    # Configure Gemini (unless --no-ai)
+    # Create an LLM provider unless --no-ai is set. Do not require Gemini API key
     model_obj = None
     if not args.no_ai:
         try:
-            genai.configure(api_key=config.GEMINI_API_KEY)
-            model_obj = genai.GenerativeModel(config.GEMINI_MODEL)
-            logger.info(f"Gemini AI configured with model: {config.GEMINI_MODEL}")
+            provider = create_llm_provider(config, logger)
+            if provider:
+                model_obj = provider
+                logger.info(f"LLM provider available: {provider.name}")
+            else:
+                logger.error("No LLM provider available and --no-ai not set. Use --no-ai or configure an LLM provider.")
+                sys.exit(1)
         except Exception as e:
-            logger.error(f"Failed to configure Gemini AI: {e}")
+            logger.error(f"Failed to initialize LLM providers: {e}")
             sys.exit(1)
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    logger.info("GOLD STANDARD SYSTEM ONLINE")
-    logger.info(f"Run interval: {config.RUN_INTERVAL_HOURS} hours")
-    logger.info("Press Ctrl+C to shutdown gracefully")
+    # Render startup banner in the console if available
+    try:
+        from scripts.console_ui import render_system_banner
+
+        render_system_banner("Gold Standard", f"Run interval: {config.RUN_INTERVAL_HOURS} hours")
+    except Exception:
+        logger.info("GOLD STANDARD SYSTEM ONLINE")
+        logger.info(f"Run interval: {config.RUN_INTERVAL_HOURS} hours")
+        logger.info("Press Ctrl+C to shutdown gracefully")
 
     # Execute immediately
     execute(config, logger, model=model_obj, dry_run=args.dry_run, no_ai=args.no_ai)

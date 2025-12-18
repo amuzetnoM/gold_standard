@@ -42,6 +42,38 @@ def get_console() -> "Console":
     return _CONSOLE
 
 
+def render_system_banner(title: str = "Gold Standard", subtitle: str = "Precious Metals Intelligence"):
+    """Render a consistent system banner for terminal startup using Rich when available."""
+    console = get_console()
+    if RICH_AVAILABLE:
+        from rich.panel import Panel
+        from rich.markdown import Markdown
+
+        md = Markdown(f"# {title}\n\n{subtitle}")
+        console.print(Panel(md, style="bold cyan", expand=True))
+    else:
+        console.print(f"=== {title} ===\n{subtitle}\n")
+
+
+def format_log_message(level: str, msg: str, module: str = "") -> str:
+    """Return a compact, styled log message for console display."""
+    if RICH_AVAILABLE:
+        from rich.text import Text
+
+        prefix = {
+            "INFO": "[green]✔[/green]",
+            "DEBUG": "[cyan]•[/cyan]",
+            "WARNING": "[yellow]⚠[/yellow]",
+            "ERROR": "[red]✖[/red]",
+            "CRITICAL": "[white on red]‼[/white on red]",
+        }.get(level, "")
+        modpart = f" [{module}]" if module else ""
+        return f"{prefix} {msg}{modpart}"
+    else:
+        modpart = f" [{module}]" if module else ""
+        return f"{level}: {msg}{modpart}"
+
+
 class RichRightTimestampHandler(logging.Handler):
     """Logging handler that renders messages with a timestamp aligned to the right.
 
@@ -90,6 +122,9 @@ def setup_console_logging(logger: logging.Logger, log_file: Optional[str] = None
     console_handler = RichRightTimestampHandler(verbose=verbose)
     console_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
     logger.addHandler(console_handler)
+
+    # Keep a simple logger name for other modules to reuse
+    logger.propagate = False
 
     # File handler (rotating) keeps a simple format with timestamp at end
     if log_file:

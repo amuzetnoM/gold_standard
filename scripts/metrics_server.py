@@ -27,7 +27,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-from db_manager import get_system_health
+try:
+    # Prefer the centralized Prometheus instrumentation if available
+    from scripts.metrics import expose_metrics
+except Exception:
+    expose_metrics = None
 
 # Metrics configuration
 METRICS_PORT = int(os.environ.get("METRICS_PORT", 8080))
@@ -40,54 +44,29 @@ last_execution_time = 0
 
 
 def get_metrics():
-    """Generate Prometheus-formatted metrics."""
-    global task_completions, task_failures, last_execution_time
+    """Return Prometheus output. Use centralized `scripts.metrics` when possible.
 
-    # Get current system health
-    health = get_system_health()
+    This function intentionally falls back to a minimal, safe output
+    if the project's `scripts.metrics` is unavailable to avoid crashes
+    when metrics server is started independently.
+    """
+    # If the consolidated metrics module is available, use it (bytes)
+    if expose_metrics:
+        try:
+            output = expose_metrics()
+            # ensure bytes -> str
+            if isinstance(output, bytes):
+                return output.decode("utf-8")
+            return str(output)
+        except Exception:
+            # Fall through to minimal fallback below
+            pass
 
-    # Build metrics output
+    # Minimal safe fallback metrics (no DB calls, always safe)
     metrics = []
-
-    # Application info
     metrics.append("# HELP gold_standard_info Application information")
     metrics.append("# TYPE gold_standard_info gauge")
-    metrics.append('gold_standard_info{version="3.4.0"} 1')
-
-    # Task counts
-    metrics.append("")
-    metrics.append("# HELP gold_standard_tasks_ready Number of tasks ready for execution")
-    metrics.append("# TYPE gold_standard_tasks_ready gauge")
-    metrics.append(f'gold_standard_tasks_ready {health.get("ready_count", 0)}')
-
-    metrics.append("")
-    metrics.append("# HELP gold_standard_tasks_scheduled Number of tasks scheduled for future")
-    metrics.append("# TYPE gold_standard_tasks_scheduled gauge")
-    metrics.append(f'gold_standard_tasks_scheduled {health.get("scheduled_count", 0)}')
-
-    metrics.append("")
-    metrics.append("# HELP gold_standard_stuck_tasks Number of tasks stuck in execution")
-    metrics.append("# TYPE gold_standard_stuck_tasks gauge")
-    metrics.append(f'gold_standard_stuck_tasks {health.get("stuck_count", 0)}')
-
-    # Execution counters
-    metrics.append("")
-    metrics.append("# HELP gold_standard_task_completions_total Total number of completed tasks")
-    metrics.append("# TYPE gold_standard_task_completions_total counter")
-    metrics.append(f"gold_standard_task_completions_total {task_completions}")
-
-    metrics.append("")
-    metrics.append("# HELP gold_standard_task_failures_total Total number of failed tasks")
-    metrics.append("# TYPE gold_standard_task_failures_total counter")
-    metrics.append(f"gold_standard_task_failures_total {task_failures}")
-
-    # Timing
-    metrics.append("")
-    metrics.append("# HELP gold_standard_last_execution_timestamp Unix timestamp of last execution")
-    metrics.append("# TYPE gold_standard_last_execution_timestamp gauge")
-    metrics.append(f"gold_standard_last_execution_timestamp {last_execution_time}")
-
-    # Uptime
+    metrics.append('gold_standard_info{version="unknown"} 1')
     metrics.append("")
     metrics.append("# HELP gold_standard_uptime_seconds Application uptime in seconds")
     metrics.append("# TYPE gold_standard_uptime_seconds gauge")
