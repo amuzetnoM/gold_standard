@@ -1,6 +1,7 @@
 # Quick tests to ensure ADX fallback handles DataFrame-shaped columns and misaligned indices
 import sys
 from pathlib import Path
+
 import pandas as pd
 
 root = Path(__file__).resolve().parent.parent
@@ -16,14 +17,6 @@ def test_adx_with_dataframe_columns():
 
     # Build a DataFrame where OHLC columns are DataFrames (duplicate columns name scenario)
     idx = pd.date_range("2020-01-01", periods=30, freq="D")
-    # Include Open and Volume to mirror what yfinance returns
-    base = pd.DataFrame({
-        "Open": pd.Series(range(30), index=idx),
-        "Close": pd.Series(range(30), index=idx),
-        "High": pd.Series(range(1, 31), index=idx),
-        "Low": pd.Series(range(0, 30), index=idx),
-        "Volume": pd.Series([1000] * 30, index=idx),
-    })
 
     # Simulate duplicated-named subframes by creating a DataFrame with MultiIndex columns
     # so that accessing df['High'] returns a DataFrame (multi-column High). This mimics
@@ -46,9 +39,9 @@ def test_adx_with_dataframe_columns():
     ohlc_wrapped = pd.DataFrame(multi_vals, index=idx, columns=midx)
     # after this, ohlc_wrapped['High'] is a DataFrame with two columns
 
-
     # Monkey patch yfinance.download to return this synthetic DF so _fetch runs the ADX logic
     import yfinance as yf
+
     orig_download = yf.download
     try:
         yf.download = lambda *a, **k: ohlc_wrapped
@@ -66,20 +59,24 @@ def test_adx_with_misaligned_indices():
 
     idx1 = pd.date_range("2020-01-01", periods=30, freq="D")
     idx2 = pd.date_range("2020-01-02", periods=30, freq="D")  # shifted by one day
-    baseA = pd.DataFrame({
-        "Open": pd.Series(range(30), index=idx1),
-        "Close": pd.Series(range(30), index=idx1),
-        "High": pd.Series(range(1, 31), index=idx1),
-        "Low": pd.Series(range(0, 30), index=idx1),
-        "Volume": pd.Series([1000] * 30, index=idx1),
-    })
-    baseB = pd.DataFrame({
-        "Open": pd.Series(range(30), index=idx2),
-        "Close": pd.Series(range(30), index=idx2),
-        "High": pd.Series(range(1, 31), index=idx2),
-        "Low": pd.Series(range(0, 30), index=idx2),
-        "Volume": pd.Series([1000] * 30, index=idx2),
-    })
+    baseA = pd.DataFrame(
+        {
+            "Open": pd.Series(range(30), index=idx1),
+            "Close": pd.Series(range(30), index=idx1),
+            "High": pd.Series(range(1, 31), index=idx1),
+            "Low": pd.Series(range(0, 30), index=idx1),
+            "Volume": pd.Series([1000] * 30, index=idx1),
+        }
+    )
+    baseB = pd.DataFrame(
+        {
+            "Open": pd.Series(range(30), index=idx2),
+            "Close": pd.Series(range(30), index=idx2),
+            "High": pd.Series(range(1, 31), index=idx2),
+            "Low": pd.Series(range(0, 30), index=idx2),
+            "Volume": pd.Series([1000] * 30, index=idx2),
+        }
+    )
 
     # Merge such that High comes from baseB (misaligned index) and others from baseA
     mixed = pd.DataFrame(index=idx1)
@@ -91,6 +88,7 @@ def test_adx_with_misaligned_indices():
 
     # Monkey patch yfinance.download to return this synthetic DF so _fetch runs the ADX logic
     import yfinance as yf
+
     orig_download = yf.download
     try:
         yf.download = lambda *a, **k: mixed
