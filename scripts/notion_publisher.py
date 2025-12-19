@@ -218,18 +218,73 @@ class NotionPublisher:
         self.client = Client(auth=self.config.api_key)
 
     def _get_database_properties(self) -> Dict[str, Any]:
-        """Return database properties dictionary (empty if unavailable).
+        """Return data-source properties if available, otherwise fall back to database properties.
 
-        This helps us build property payloads that match the Notion schema
-        and avoid 400 errors when property types mismatch.
+        This method attempts to discover a `data_source_id` for the configured
+        database (via the `GET /v1/databases/:database_id` API using
+        Notion-Version: 2025-09-03) and then fetches the properties for that
+        data source with `GET /v1/data_sources/:data_source_id`.
+
+        If any step fails we fall back to the historic `databases.retrieve`
+        behavior to remain compatible with older API versions.
         """
         try:
-            db = self.client.databases.retrieve(self.config.database_id)
-            props = db.get("properties", {}) or {}
-            return props
+            # If user pinned a data source via env, respect it
+            ds_id = os.getenv("NOTION_DATA_SOURCE_ID") or getattr(self, "_data_source_id", None)
+
+            # Discovery step: fetch data_sources for the database (2025-09-03 behavior)
+            if not ds_id:
+                try:
+                    import requests
+
+                    url = f"https://api.notion.com/v1/databases/{self.config.database_id}"
+                    headers = {
+                        "Authorization": f"Bearer {self.config.api_key}",
+                        "Notion-Version": "2025-09-03",
+                        "Content-Type": "application/json",
+                    }
+                    r = requests.get(url, headers=headers, timeout=10)
+                    r.raise_for_status()
+                    payload = r.json() or {}
+                    data_sources = payload.get("data_sources") or []
+                    if data_sources:
+                        ds_id = data_sources[0].get("id")
+                        self._data_source_id = ds_id
+                except Exception:
+                    # Discovery failed - we will fall back to database properties
+                    ds_id = getattr(self, "_data_source_id", None)
+
+            # If we have a data source id, fetch its schema (properties)
+            if ds_id:
+                try:
+                    import requests
+
+                    url = f"https://api.notion.com/v1/data_sources/{ds_id}"
+                    headers = {
+                        "Authorization": f"Bearer {self.config.api_key}",
+                        "Notion-Version": "2025-09-03",
+                        "Content-Type": "application/json",
+                    }
+                    r = requests.get(url, headers=headers, timeout=10)
+                    r.raise_for_status()
+                    payload = r.json() or {}
+                    props = payload.get("properties", {}) or {}
+                    self._data_source_props = props
+                    return props
+                except Exception:
+                    # If fetching data source failed, fallthrough to DB retrieve
+                    pass
+
+            # Fallback: retrieve database properties via the notion client
+            try:
+                db = self.client.databases.retrieve(self.config.database_id)
+                props = db.get("properties", {}) or {}
+                return props
+            except Exception as e:
+                print(f"[NotionPublisher] Could not retrieve database properties: {e}")
+                return {}
         except Exception as e:
-            # Don't raise here; caller will fall back to safe behavior
-            print(f"[NotionPublisher] Could not retrieve database properties: {e}")
+            print(f"[NotionPublisher] Error while getting database/data-source properties: {e}")
             return {}
 
     def detect_type(self, filename: str) -> str:
@@ -615,6 +670,20 @@ class NotionPublisher:
         except Exception:
             pass
 
+        # Determine parent to use for page creation - prefer a specific data_source_id when available
+        parent = {"database_id": self.config.database_id}
+        try:
+            ds_id = os.getenv("NOTION_DATA_SOURCE_ID") or getattr(self, "_data_source_id", None)
+            if not ds_id:
+                # Trigger discovery (which will populate _data_source_id if possible)
+                _ = self._get_database_properties()
+                ds_id = getattr(self, "_data_source_id", None)
+            if ds_id:
+                parent = {"type": "data_source_id", "data_source_id": ds_id}
+        except Exception:
+            # Leave parent as database_id on any error to preserve backwards compatibility
+            parent = {"database_id": self.config.database_id}
+
         # Create page with robust retry logic and exponential backoff
         attempts = 3
         delay = 1
@@ -622,7 +691,7 @@ class NotionPublisher:
         for attempt in range(1, attempts + 1):
             try:
                 response = self.client.pages.create(
-                    parent={"database_id": self.config.database_id},
+                    parent=parent,
                     properties=properties,
                     children=blocks[:100],  # Notion limit per request
                 )
@@ -639,7 +708,7 @@ class NotionPublisher:
                         if prop_type == "status" and "select" in properties["Status"]:
                             properties["Status"] = {"status": {"name": properties["Status"]["select"]["name"]}}
                             response = self.client.pages.create(
-                                parent={"database_id": self.config.database_id},
+                                parent=parent,
                                 properties=properties,
                                 children=blocks[:100],
                             )
@@ -648,7 +717,7 @@ class NotionPublisher:
                         elif prop_type == "select" and "status" in properties["Status"]:
                             properties["Status"] = {"select": {"name": properties["Status"]["status"]["name"]}}
                             response = self.client.pages.create(
-                                parent={"database_id": self.config.database_id},
+                                parent=parent,
                                 properties=properties,
                                 children=blocks[:100],
                             )
@@ -662,7 +731,7 @@ class NotionPublisher:
                 try:
                     minimal_props = {"title": properties.get("title")}
                     response = self.client.pages.create(
-                        parent={"database_id": self.config.database_id},
+                        parent=parent,
                         properties=minimal_props,
                         children=blocks[:100],
                     )
@@ -816,7 +885,9 @@ class NotionPublisher:
                 }
 
         # Acquire per-file publish lock to avoid concurrent publishes creating duplicates
-        lock_dir = Path(self.config.database_id or PROJECT_ROOT / ".cache") / "notion_locks"
+        # Ensure locks live under the project cache directory to avoid trying to
+        # create a directory with the raw database id as a top-level path.
+        lock_dir = Path.home() / ".cache" / "gold_standard" / (self.config.database_id or "notion") / "notion_locks"
         lock_dir.mkdir(parents=True, exist_ok=True)
         lock_name = hashlib.md5(str(path).encode()).hexdigest() + ".lock"
         lock_path = lock_dir / lock_name
