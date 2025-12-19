@@ -7,6 +7,7 @@ Provides:
 
 This module falls back to simple prints if 'rich' is not available.
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,11 +15,11 @@ from datetime import datetime
 from typing import Optional
 
 try:
-    from rich.console import Console
-    from rich.columns import Columns
-    from rich.text import Text
     from rich.align import Align
-    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+    from rich.columns import Columns
+    from rich.console import Console
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+
     RICH_AVAILABLE = True
 except Exception:
     RICH_AVAILABLE = False
@@ -46,8 +47,8 @@ def render_system_banner(title: str = "Gold Standard", subtitle: str = "Precious
     """Render a consistent system banner for terminal startup using Rich when available."""
     console = get_console()
     if RICH_AVAILABLE:
-        from rich.panel import Panel
         from rich.markdown import Markdown
+        from rich.panel import Panel
 
         md = Markdown(f"# {title}\n\n{subtitle}")
         console.print(Panel(md, style="bold cyan", expand=True))
@@ -55,11 +56,21 @@ def render_system_banner(title: str = "Gold Standard", subtitle: str = "Precious
         console.print(f"=== {title} ===\n{subtitle}\n")
 
 
-def format_log_message(level: str, msg: str, module: str = "") -> str:
-    """Return a compact, styled log message for console display."""
-    if RICH_AVAILABLE:
-        from rich.text import Text
+MODULE_TAGS = {
+    "GoldStandard": ("GS", "yellow"),
+    "DatabaseManager": ("DB", "magenta"),
+    "executor_daemon": ("EX", "cyan"),
+    "genai_compat": ("LLM", "cyan"),
+}
 
+
+def get_compact_message(level: str, module: Optional[str], msg: str) -> str:
+    """Return a compact, styled log message for console display.
+
+    Compact format: [level_symbol] [MOD] message
+    Module names are mapped to short tokens and colored for quick scanning.
+    """
+    if RICH_AVAILABLE:
         prefix = {
             "INFO": "[green]✔[/green]",
             "DEBUG": "[cyan]•[/cyan]",
@@ -67,8 +78,14 @@ def format_log_message(level: str, msg: str, module: str = "") -> str:
             "ERROR": "[red]✖[/red]",
             "CRITICAL": "[white on red]‼[/white on red]",
         }.get(level, "")
-        modpart = f" [{module}]" if module else ""
-        return f"{prefix} {msg}{modpart}"
+
+        modpart = ""
+        if module:
+            tag, color = MODULE_TAGS.get(module, (module.split('.')[-1][:3].upper(), "white"))
+            modpart = f" [{tag}]" if tag else ""
+            return f"{prefix} [bold {color}]{modpart}[/bold {color}] {msg}"
+
+        return f"{prefix} {msg}"
     else:
         modpart = f" [{module}]" if module else ""
         return f"{level}: {msg}{modpart}"
@@ -95,20 +112,41 @@ class RichRightTimestampHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            msg = self.format(record)
+            # Prefer using the raw record message and the logger name to build a compact line
+            msg = record.getMessage()
             ts = datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
             level = record.levelname
+            module = record.name
             if RICH_AVAILABLE:
+                from rich.text import Text
+
                 style = self.LEVEL_STYLES.get(level, "")
-                left = Text(msg)
-                if style:
-                    left.stylize(style)
+                # Build compact left-hand side with level symbol + short module tag + message
+                left = Text()
+
+                # Level symbol
+                prefix = {
+                    "INFO": "✔",
+                    "DEBUG": "•",
+                    "WARNING": "⚠",
+                    "ERROR": "✖",
+                    "CRITICAL": "‼",
+                }.get(level, "")
+                if prefix:
+                    left.append(f"{prefix} ")
+                # Module tag (short, colored)
+                tag, color = MODULE_TAGS.get(module, (module.split('.')[-1][:3].upper(), "white"))
+                left.append(f"[{tag}] ", style=f"bold {color}")
+
+                # Message body
+                left.append(msg, style=style)
+
                 right = Align(Text(ts, style="dim"), align="right")
                 # Columns with expand=True will attempt to place timestamp at the far right
                 self.console.print(Columns([left, right], expand=True))
             else:
                 # Fallback: simple print with timestamp on the right separated by '|' for clarity
-                print(f"{msg} | {ts}")
+                print(f"{level}: {msg} | {ts}")
         except Exception:
             self.handleError(record)
 

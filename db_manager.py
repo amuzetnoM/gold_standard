@@ -17,10 +17,10 @@ SQLite-based storage for reports, journals, analysis data, and insights.
 Provides intelligent redundancy control, date-wise organization, and task management.
 """
 
-import sqlite3
 import json
-from contextlib import contextmanager
 import logging
+import sqlite3
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -1137,6 +1137,27 @@ class DatabaseManager:
                 for row in cursor.fetchall()
             ]
 
+    def get_latest_price(self, asset: str) -> Optional[float]:
+        """Return the latest recorded price for the given asset from analysis_snapshots.
+
+        Returns None if no historic price is available.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT price FROM analysis_snapshots
+                WHERE asset = ?
+                ORDER BY date DESC
+                LIMIT 1
+                """,
+                (asset,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return row["price"]
+            return None
+
     # ==========================================
     # PRE-MARKET PLANS
     # ==========================================
@@ -1285,7 +1306,7 @@ class DatabaseManager:
                         WHERE status = 'in_progress'
                           AND (strftime('%s', 'now') - strftime('%s', updated_at)) > ?
                     """,
-                        (ttl_seconds,)
+                        (ttl_seconds,),
                     )
                     return cursor.rowcount
                 except Exception:
@@ -1448,7 +1469,7 @@ class DatabaseManager:
                         filtered["metadata"] = str(filtered["metadata"])
                     self.save_action_insight(**filtered)
                 saved += 1
-            except Exception as exc:  # pragma: no cover - defensive logging
+            except Exception:  # pragma: no cover - defensive logging
                 # Log the exception so callers can diagnose failures
                 logger.exception("Failed to save action insight: %s", getattr(action, "action_id", action))
                 continue
@@ -1721,8 +1742,8 @@ class DatabaseManager:
         final_result = result_data if result_data is not None else result
 
         # Retry transient I/O/DB errors (Errno 5 / sqlite3 OperationalError)
-        import time
         import sqlite3
+        import time
 
         retries = 0
         max_retries = 5
@@ -1760,7 +1781,9 @@ class DatabaseManager:
                         pass
                     logging.getLogger(__name__).error(f"Failed to log task execution after {max_retries} retries: {e}")
                     raise
-                logging.getLogger(__name__).warning(f"Transient DB error logging task (attempt {retries}/{max_retries}): {e}; retrying in {backoff}s")
+                logging.getLogger(__name__).warning(
+                    f"Transient DB error logging task (attempt {retries}/{max_retries}): {e}; retrying in {backoff}s"
+                )
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 5.0)
 
@@ -1841,7 +1864,9 @@ class DatabaseManager:
         """Return cached LLM response by prompt_hash if present."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT prompt, response, usage_count, last_used FROM llm_cache WHERE prompt_hash = ?", (prompt_hash,))
+            cursor.execute(
+                "SELECT prompt, response, usage_count, last_used FROM llm_cache WHERE prompt_hash = ?", (prompt_hash,)
+            )
             row = cursor.fetchone()
             if not row:
                 return None
