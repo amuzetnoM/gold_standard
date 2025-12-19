@@ -12,8 +12,6 @@
 # All rights reserved.
 # ══════════════════════════════════════════════════════════════════════════════
 import argparse
-import shutil
-from colorama import Fore, Style, init as colorama_init
 import datetime
 import json
 import logging
@@ -22,6 +20,7 @@ import re
 import signal
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,7 +29,6 @@ import filelock
 import pandas as pd
 import schedule
 from dotenv import load_dotenv
-from concurrent.futures import ThreadPoolExecutor
 
 try:
     import pandas_ta as ta
@@ -124,6 +122,7 @@ try:
     # Prefer local helper if provided by `scripts/local_llm.py`
     from scripts.local_llm import get_env_int as _get_env_int  # type: ignore
 except Exception:
+
     def _get_env_int(key: str, default: int) -> int:
         v = os.environ.get(key, "")
         try:
@@ -150,6 +149,7 @@ class GeminiProvider(LLMProvider):
         # Try the legacy `google.generativeai` package first, then the compat shim.
         try:
             import google.generativeai as genai_mod  # type: ignore
+
             self._genai = genai_mod
             self.model = genai_mod.GenerativeModel(model_name)
             self.name = "Gemini"
@@ -335,10 +335,12 @@ class FallbackLLMProvider(LLMProvider):
                 if globals().get("genai") is None:
                     try:
                         import google.generativeai as genai_mod  # type: ignore
+
                         globals()["genai"] = genai_mod
                     except Exception:
                         try:
                             from scripts import genai_compat as genai_compat  # type: ignore
+
                             globals()["genai"] = genai_compat
                         except Exception:
                             # Neither client importable — propagate to fallback handling
@@ -534,11 +536,11 @@ class FallbackLLMProvider(LLMProvider):
 
             prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
             cache_entry = db.get_llm_cache(prompt_hash)
-            cache_ttl = int(os.environ.get("LLM_CACHE_TTL_SECONDS", "86400"))
             if cache_entry and cache_entry.get("last_used"):
                 # If entry exists, return cached response (best-effort freshness)
                 self.logger.info(f"[LLM] Cache hit for prompt (hash={prompt_hash[:8]})")
                 db.set_llm_cache(prompt_hash, cache_entry["prompt"], cache_entry["response"])  # bump usage
+
                 # Return a simple object mimicking provider response
                 class CachedResp:
                     def __init__(self, text):
@@ -559,8 +561,9 @@ class FallbackLLMProvider(LLMProvider):
 
                 # Best-effort: store in cache and log usage
                 try:
-                    from db_manager import get_db
                     import hashlib
+
+                    from db_manager import get_db
 
                     db = get_db()
                     prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
@@ -619,7 +622,7 @@ def _extract_usage_from_response(resp: Any) -> tuple[int, float]:
     try:
         # Prefer provider-specific parsers for accurate metrics
         try:
-            from scripts.llm_adapters import parse_gemini_usage, parse_ollama_usage, parse_generic_usage
+            from scripts.llm_adapters import parse_gemini_usage, parse_generic_usage, parse_ollama_usage
         except Exception:
             parse_gemini_usage = parse_ollama_usage = parse_generic_usage = None
 
@@ -948,6 +951,7 @@ class Cortex:
         # Prefer saving memory to DB for atomic writes
         try:
             from db_manager import get_db
+
             db = get_db()
             db.set_cortex_memory(self.memory)
             self.logger.info("Successfully saved cortex memory to database (cortex_memory table)")
@@ -1301,7 +1305,7 @@ class QuantEngine:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             for key, conf in ASSETS.items():
                 conf = ASSETS[key]
-                futures[ex.submit(self._fetch, conf["p"], conf["b"]) ] = (key, conf)
+                futures[ex.submit(self._fetch, conf["p"], conf["b"])] = (key, conf)
 
             for fut in futures:
                 key, conf = futures[fut]
@@ -1366,13 +1370,7 @@ class QuantEngine:
             return None
 
         # Calculate intermarket ratios
-        if "GOLD" in snapshot and "SILVER" in snapshot:
-            gold_price = snapshot["GOLD"]["price"]
-            silver_price = snapshot["SILVER"]["price"]
-            if silver_price and silver_price > 0:
-                gsr = round(gold_price / silver_price, 2)
-                snapshot["RATIOS"] = {"GSR": gsr}
-                self.logger.info(f"Gold/Silver Ratio: {gsr}")
+        snapshot = self._compute_intermarket_ratios(snapshot)
 
         return snapshot
 
@@ -1387,6 +1385,57 @@ class QuantEngine:
             return result
         except (ValueError, TypeError):
             return None
+
+    def _compute_intermarket_ratios(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        """Compute and attach intermarket ratios such as GSR to the snapshot.
+
+        Uses historic prices from the database as a fallback when current
+        snapshot data for an asset is missing or invalid.
+        """
+        # Local import to avoid circular dependency at module import time
+        try:
+            from db_manager import get_db
+        except Exception:
+            get_db = None
+
+        gold_price = None
+        silver_price = None
+
+        if "GOLD" in snapshot:
+            gold_price = snapshot["GOLD"].get("price")
+        if "SILVER" in snapshot:
+            silver_price = snapshot["SILVER"].get("price")
+
+        # Fallback: use latest historic price from DB when missing
+        if (silver_price is None or silver_price == 0) and get_db:
+            try:
+                silver_price = get_db().get_latest_price("SILVER")
+                if silver_price:
+                    self.logger.debug(f"Using fallback historic silver price: {silver_price}")
+            except Exception as e:
+                self.logger.debug(f"Failed to fetch historic silver price: {e}")
+
+        if (gold_price is None or gold_price == 0) and get_db:
+            try:
+                gold_price = get_db().get_latest_price("GOLD")
+                if gold_price:
+                    self.logger.debug(f"Using fallback historic gold price: {gold_price}")
+            except Exception as e:
+                self.logger.debug(f"Failed to fetch historic gold price: {e}")
+
+        try:
+            gold_price_f = self._safe_float(gold_price)
+            silver_price_f = self._safe_float(silver_price)
+            if gold_price_f is not None and silver_price_f is not None and silver_price_f > 0:
+                gsr = round(gold_price_f / silver_price_f, 2)
+                snapshot["RATIOS"] = {"GSR": gsr}
+                self.logger.info(f"Gold/Silver Ratio: {gsr}")
+            else:
+                self.logger.debug("GSR not computed: missing or invalid gold/silver prices")
+        except Exception as e:
+            self.logger.debug(f"Failed to compute GSR: {e}")
+
+        return snapshot
 
     def _fetch(self, primary: str, backup: str) -> Optional[pd.DataFrame]:
         """Fetch market data with fallback to backup ticker."""
@@ -1410,6 +1459,7 @@ class QuantEngine:
 
                 # Validate minimal columns exist
                 required_columns = ["Open", "High", "Low", "Close"]
+
                 def _has_col(df, col):
                     if col in df.columns:
                         return True
@@ -1465,7 +1515,7 @@ class QuantEngine:
                                         s = pd.Series(arr, index=df.index)
                                     elif 0 < arr.size < len(df):
                                         # right-align shorter result to the tail of df
-                                        idx = df.index[-arr.size:]
+                                        idx = df.index[-arr.size :]
                                         s = pd.Series(arr, index=idx)
                                         s = s.reindex(df.index)
                                     else:
@@ -1477,7 +1527,7 @@ class QuantEngine:
                                     if first_col.size == len(df):
                                         s = pd.Series(first_col, index=df.index)
                                     elif 0 < first_col.size < len(df):
-                                        idx = df.index[-first_col.size:]
+                                        idx = df.index[-first_col.size :]
                                         s = pd.Series(first_col, index=idx)
                                         s = s.reindex(df.index)
                                     else:
@@ -1640,7 +1690,9 @@ class QuantEngine:
                         dx = (plus_di - minus_di).abs() / denom * 100
                         adx_ser = dx.rolling(window=14, min_periods=14).mean()
 
-                        adx_df = pd.DataFrame({"ADX_14": adx_ser, "DMP_14": plus_di, "DMN_14": minus_di}, index=adx_ser.index)
+                        adx_df = pd.DataFrame(
+                            {"ADX_14": adx_ser, "DMP_14": plus_di, "DMN_14": minus_di}, index=adx_ser.index
+                        )
                 except Exception as e:
                     self.logger.warning(f"ADX computation failed for {ticker}: {e}")
                     adx_df = None
@@ -1715,6 +1767,7 @@ class QuantEngine:
             if name in getattr(self, "_generated_charts", set()):
                 self.logger.info(f"Chart already generated in this run, skipping: {chart_path}")
                 return
+
             # Prepare additional plots
             # Prefer columns if precomputed by _fetch; else compute safely
             def safe_sma(series, length):
@@ -1991,13 +2044,13 @@ Intermarket Ratios:
 Current Regime Detection: {regime} (ADX: {gold_adx})
 
 === NEWS CONTEXT ===
-{chr(10).join(['* ' + n for n in self.news[:5]]) if self.news else "No significant headlines."}
+{chr(10).join(["* " + n for n in self.news[:5]]) if self.news else "No significant headlines."}
 
 === ANALYSIS FRAMEWORK ===
 
 Generate a comprehensive trading journal following this EXACT structure:
 
-## Date: {datetime.date.today().strftime('%B %d, %Y')}
+## Date: {datetime.date.today().strftime("%B %d, %Y")}
 
 ---
 
@@ -2230,7 +2283,15 @@ def execute(
 
             # Get silver price and GSR for database
             silver_price = data.get("SILVER", {}).get("price", 0)
-            gsr = gold_price / silver_price if silver_price > 0 else 0
+            # Prefer computed RATIOS if present, otherwise compute safely here
+            gsr = data.get("RATIOS", {}).get("GSR")
+            if gsr is None:
+                try:
+                    g_price = float(gold_price) if gold_price is not None else 0
+                    s_price = float(silver_price) if silver_price is not None else 0
+                    gsr = round(g_price / s_price, 2) if s_price > 0 else 0
+                except Exception:
+                    gsr = 0
 
             entry = JournalEntry(
                 date=str(datetime.date.today()),
@@ -2298,8 +2359,14 @@ def main() -> None:
     # Parse CLI arguments
     parser = argparse.ArgumentParser(description="Gold Standard Quant Analysis")
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
-    parser.add_argument("--wait", action="store_true", help="Wait (bounded by timeout) for post-analysis tasks to complete before exit")
-    parser.add_argument("--wait-forever", action="store_true", help="Wait indefinitely until no tasks, no new insights, and all documents are published to Notion before exiting")
+    parser.add_argument(
+        "--wait", action="store_true", help="Wait (bounded by timeout) for post-analysis tasks to complete before exit"
+    )
+    parser.add_argument(
+        "--wait-forever",
+        action="store_true",
+        help="Wait indefinitely until no tasks, no new insights, and all documents are published to Notion before exiting",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Run without writing memory/report")
     parser.add_argument("--no-ai", action="store_true", help="Do not call AI, produce a skeleton report")
     parser.add_argument("--force", "-f", action="store_true", help="Force regenerate charts and re-run expensive steps")
@@ -2324,7 +2391,7 @@ def main() -> None:
 
     # Start metrics server (Prometheus) if available
     try:
-        from gold_standard.metrics import start_metrics_server, set_readiness
+        from gold_standard.metrics import set_readiness, start_metrics_server
 
         start_metrics_server()
         # Mark readiness; modules may update later
@@ -2341,7 +2408,9 @@ def main() -> None:
                 model_obj = provider
                 logger.info(f"LLM provider available: {provider.name}")
             else:
-                logger.warning("No LLM provider available; continuing without AI. Use --no-ai to suppress this message or configure an LLM provider.")
+                logger.warning(
+                    "No LLM provider available; continuing without AI. Use --no-ai to suppress this message or configure an LLM provider."
+                )
                 model_obj = None
         except Exception as e:
             logger.warning(f"Failed to initialize LLM providers: {e}. Continuing without AI.")
