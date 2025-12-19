@@ -564,7 +564,10 @@
             </div>
 
             <div class="content">
-                <span class="version-badge">&#9679; v3.5.0</span>
+                <span class="version-badge">&#9679; v3.5.2</span>
+                <div class="patch-callout" style="margin-top:0.75rem;padding:0.75rem;border-left:4px solid var(--accent-gold);background:var(--accent-gold-dim);color:var(--text-primary);">
+                    <strong>v3.5.2 Patch (2025-12-19)</strong> — GSR computation and console UX fixes. <a href="https://github.com/amuzetnoM/gold_standard/releases/tag/v3.5.2" style="color:var(--accent-gold);text-decoration:underline;">Release notes</a>
+                </div>
                 <h1>Documentation</h1>
                 <p class="page-lead">
                     Comprehensive reference for the Gold Standard Precious Metals Intelligence System.
@@ -602,6 +605,13 @@
                     Gold Standard is a Precious Metals Intelligence System that combines market data ingestion,
                     technical analysis, regime/strategy synthesis, memory/persistence, and optional AI-enhanced insights.
                 </p>
+
+                <h2 id="whats-new">What's New (v3.5.2)</h2>
+                <ul>
+                    <li><strong>GSR reliability</strong> — Gold/Silver Ratio now uses a DB fallback to compute reliably when live prices are missing or invalid.</li>
+                    <li><strong>Console UX</strong> — Compact, color-coded module tags and reduced logger-name noise for clearer terminal output.</li>
+                    <li><strong>Tests & Docker</strong> — Unit tests added and Docker images published as <code>ghcr.io/amuzetnom/gold_standard:3.5.2</code>.</li>
+                </ul>
 
                 <h3>Key Capabilities</h3>
                 <ul>
