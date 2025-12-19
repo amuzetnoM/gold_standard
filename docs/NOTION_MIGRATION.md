@@ -1,4 +1,5 @@
-# Notion 2025-09-03 Migration & Gold Standard operational guide
+# Notion Migration & Operational guide
+>  2025-09-03 
 
 This document covers the migration steps and operational hardening we've implemented to support Notion's 2025-09-03 multi-source databases.
 
@@ -36,8 +37,4 @@ This document covers the migration steps and operational hardening we've impleme
 
 ---
 
-If you want, I can now:
-- Finish the remaining NotionPublisher mapping (relation properties, more property types) and webhook handlers, with tests and integration tests.
-- Configure a scheduled smoke test and CI secret for a test data source.
-- Harden the healthcheck to attempt more recoveries (re-try publishing failed items, rotate tokens, etc.).
 
