@@ -9,28 +9,15 @@
 
 ### 🔬 Focus: Ingest Engine (Research) ⚡️
 
-- **Short:** Prototype an ingest engine to collect and normalize streaming/real-time data from multiple providers (FRED, Rapid, MarketFlow, TradingEconomics, yfinance/mplfinance) and persist the latest outputs independently of the main analysis loop.
+- **Short:** An ingest engine prototype to collect and normalize streaming/real-time data from multiple providers (FRED, Rapid, MarketFlow, TradingEconomics, yfinance/mplfinance) and persist the latest outputs independently of the main analysis loop.
 - **Goal:** Produce canonical, timestamp-normalized time series and lightweight vectorized artifacts suitable for downstream ML/LLM research. This is an exploratory research component; production-grade model training is out-of-scope for Gold Standard core.
-- **Approach:** Start with a blueprint & skeleton in `src/ingest_bot/` (connectors, fetchers, normalization layer, metadata), keep ingest runtime and keys out of the repo (see `.gitignore`), and expose an isolated ingest API for pull-based updates.
 
-All notable changes to Gold Standard are documented in this file.
-
-This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+# Changelog and Release History
 
-> Version 3.5.2 Patch (2025-12-19)
 
-Patch Summary: Runner finish & docs, ADX robustness, venv and Notion hardening, and CLI wait-mode improvements.
-
-Key fixes and improvements:
-- **ADX & Indicator Robustness:** Fixed ADX computation to handle multi-column OHLC inputs and misaligned indices; added safe fallbacks and unit tests (`tests/test_adx_robust.py`). Prevents ADX crashes from irregular data shapes.
-- **Deterministic Single-Run Wait Behavior:** Added `--wait` and `--wait-forever` flags and made wait-forever the default for `--once` (block until post-analysis tasks complete). Ensures a single-run waits until all insights/actions/publishing finish.
-- **VenV and Startup Hardening:** `run.py` re-executes itself under the project venv if available; `scripts/start_executor.sh` now sources the repository `.env` and prefers project venv for detached executor processes to ensure consistent runtime and available secrets.
-- **Publishing & Orchestration Helpers:** Added `publish_documents_once()` helper in `run.py` to centralize Notion sync logic and improve reliability and testability of post-analysis publishing.
-- **Documentation & Changelog Updates:** Added entries and updated README and setup guides to reflect venv usage, LLM provider checks, and Notion env requirements.
-- **Tests & E2E Validation:** Added unit tests and executed an end-to-end single-run (insights → tasks → organization → publish attempt). All unit tests pass locally.
 
 > Version 3.5.1 Patch (2025-12-18)
 
@@ -46,6 +33,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### HIGHLIGHTS
 
 > Version 3.5.2 Patch (2025-12-19)
+
+### Runner finish & ADX robustness — CLI & venv hardening
 
 Patch Summary: Runner finish & docs, ADX robustness, venv and Notion hardening, and CLI wait-mode improvements.
 
@@ -254,6 +243,8 @@ We are designing automated backup strategies that protect critical data without 
 
 ## [3.6.0] - 2025-12-20
 
+### Subscription & Alerting — Blueprint & Observability
+
 ### Added
 - Subscription and alerting system for Discord: users can subscribe to `sanitizer`, `queue`, and `digests` topics and receive direct alerts for on-call triage.
 - Automated per-topic alerting background worker that notifies subscribers when thresholds are exceeded.
@@ -270,6 +261,8 @@ We are designing automated backup strategies that protect critical data without 
 
 ## [3.5.3] - 2025-12-20
 
+### Sanitizer & Observability — Sanity enforcement and audit
+
 Patch Summary: Sanity enforcement, observability, and worker hardening.
 
 Key fixes and improvements:
@@ -284,6 +277,8 @@ Key fixes and improvements:
 
 
 ## [3.4.0] - 2025-12-13
+
+### Standalone Executor & Docker — Task Executor daemon and services
 
 ### Added
 - **Standalone Task Executor Daemon** (`scripts/executor_daemon.py`)
