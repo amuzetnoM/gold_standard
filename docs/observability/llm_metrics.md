@@ -34,3 +34,5 @@ We added `deploy/prometheus/gold_standard_llm_rules.yml` with the following aler
 
 - Add Alertmanager routing rules and a silence policy for known maintenance windows.
 - Add a Grafana dashboard panel showing queue length, sanitizer corrections, and worker processing count.
+
+- Consider enabling the daily LLM operations report (see `src/digest_bot/daily_report.py`) to post a concise daily summary to a Discord/Slack channel so the team can spot trends without opening Grafana. Use `DISCORD_WEBHOOK_URL` env var or a systemd timer to schedule runs.
