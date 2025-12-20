@@ -148,6 +148,27 @@ class DatabaseManager:
                 )
             """)
 
+            # LLM sanitizer audit table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS llm_sanitizer_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER,
+                    corrections INTEGER DEFAULT 0,
+                    notes TEXT,
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+
+    def save_llm_sanitizer_audit(self, task_id: int, corrections: int, notes: str = None) -> int:
+        """Save a sanitizer audit record."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO llm_sanitizer_audit (task_id, corrections, notes) VALUES (?, ?, ?)",
+                (task_id, corrections, notes),
+            )
+            return cursor.lastrowid
+
             # Reports table - weekly, monthly, yearly
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS reports (
@@ -1173,34 +1194,85 @@ class DatabaseManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            cursor.execute(
-                """
-                INSERT INTO analysis_snapshots
-                (date, asset, price, rsi, sma_50, sma_200, atr, adx, trend, raw_data)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(date, asset) DO UPDATE SET
-                    price = excluded.price,
-                    rsi = excluded.rsi,
-                    sma_50 = excluded.sma_50,
-                    sma_200 = excluded.sma_200,
-                    atr = excluded.atr,
-                    adx = excluded.adx,
-                    trend = excluded.trend,
-                    raw_data = excluded.raw_data
-            """,
-                (
-                    snapshot.date,
-                    snapshot.asset,
-                    snapshot.price,
-                    snapshot.rsi,
-                    snapshot.sma_50,
-                    snapshot.sma_200,
-                    snapshot.atr,
-                    snapshot.adx,
-                    snapshot.trend,
-                    snapshot.raw_data,
-                ),
-            )
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO analysis_snapshots
+                    (date, asset, price, rsi, sma_50, sma_200, atr, adx, trend, raw_data)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(date, asset) DO UPDATE SET
+                        price = excluded.price,
+                        rsi = excluded.rsi,
+                        sma_50 = excluded.sma_50,
+                        sma_200 = excluded.sma_200,
+                        atr = excluded.atr,
+                        adx = excluded.adx,
+                        trend = excluded.trend,
+                        raw_data = excluded.raw_data
+                """,
+                    (
+                        snapshot.date,
+                        snapshot.asset,
+                        snapshot.price,
+                        snapshot.rsi,
+                        snapshot.sma_50,
+                        snapshot.sma_200,
+                        snapshot.atr,
+                        snapshot.adx,
+                        snapshot.trend,
+                        snapshot.raw_data,
+                    ),
+                )
+            except sqlite3.OperationalError as oe:
+                if 'no such table' in str(oe).lower():
+                    cursor.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS analysis_snapshots (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            date TEXT NOT NULL,
+                            asset TEXT NOT NULL,
+                            price REAL,
+                            rsi REAL,
+                            sma_50 REAL,
+                            sma_200 REAL,
+                            atr REAL,
+                            adx REAL,
+                            trend TEXT,
+                            raw_data TEXT,
+                            UNIQUE(date, asset)
+                        )
+                        """
+                    )
+                    cursor.execute(
+                        """
+                        INSERT INTO analysis_snapshots
+                        (date, asset, price, rsi, sma_50, sma_200, atr, adx, trend, raw_data)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(date, asset) DO UPDATE SET
+                            price = excluded.price,
+                            rsi = excluded.rsi,
+                            sma_50 = excluded.sma_50,
+                            sma_200 = excluded.sma_200,
+                            atr = excluded.atr,
+                            adx = excluded.adx,
+                            trend = excluded.trend,
+                            raw_data = excluded.raw_data
+                    """,
+                        (
+                            snapshot.date,
+                            snapshot.asset,
+                            snapshot.price,
+                            snapshot.rsi,
+                            snapshot.sma_50,
+                            snapshot.sma_200,
+                            snapshot.atr,
+                            snapshot.adx,
+                            snapshot.trend,
+                            snapshot.raw_data,
+                        ),
+                    )
+                else:
+                    raise
 
             return True
 
@@ -1606,40 +1678,104 @@ class DatabaseManager:
             # Use provided created_at if present, otherwise use now
             created = created_at or now
 
-            cursor.execute(
-                """
-                INSERT INTO action_insights
-                (action_id, action_type, title, description, priority, status,
-                 source_report, source_context, deadline, scheduled_for, result, created_at, completed_at, retry_count, last_error, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(action_id) DO UPDATE SET
-                    status = excluded.status,
-                    description = excluded.description,
-                    scheduled_for = excluded.scheduled_for,
-                    result = excluded.result,
-                    retry_count = excluded.retry_count,
-                    last_error = excluded.last_error,
-                    metadata = COALESCE(excluded.metadata, action_insights.metadata)
-            """,
-                (
-                    action_id,
-                    action_type,
-                    title,
-                    description,
-                    priority,
-                    status,
-                    source_report,
-                    source_context,
-                    deadline,
-                    scheduled_for,
-                    result,
-                    created,
-                    completed_at,
-                    retry_count,
-                    last_error,
-                    metadata,
-                ),
-            )
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO action_insights
+                    (action_id, action_type, title, description, priority, status,
+                     source_report, source_context, deadline, scheduled_for, result, created_at, completed_at, retry_count, last_error, metadata)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(action_id) DO UPDATE SET
+                        status = excluded.status,
+                        description = excluded.description,
+                        scheduled_for = excluded.scheduled_for,
+                        result = excluded.result,
+                        retry_count = excluded.retry_count,
+                        last_error = excluded.last_error,
+                        metadata = COALESCE(excluded.metadata, action_insights.metadata)
+                """,
+                    (
+                        action_id,
+                        action_type,
+                        title,
+                        description,
+                        priority,
+                        status,
+                        source_report,
+                        source_context,
+                        deadline,
+                        scheduled_for,
+                        result,
+                        created,
+                        completed_at,
+                        retry_count,
+                        last_error,
+                        metadata,
+                    ),
+                )
+            except sqlite3.OperationalError as oe:
+                # Defensive: ensure table exists in case initialization failed unexpectedly
+                if 'no such table' in str(oe).lower():
+                    cursor.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS action_insights (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            action_id TEXT UNIQUE NOT NULL,
+                            action_type TEXT NOT NULL,
+                            title TEXT NOT NULL,
+                            description TEXT,
+                            priority TEXT DEFAULT 'medium',
+                            status TEXT DEFAULT 'pending',
+                            source_report TEXT,
+                            source_context TEXT,
+                            deadline TEXT,
+                            scheduled_for TEXT,
+                            result TEXT,
+                            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                            completed_at TEXT,
+                            retry_count INTEGER DEFAULT 0,
+                            last_error TEXT,
+                            metadata TEXT
+                        )
+                        """
+                    )
+                    # Retry the insert
+                    cursor.execute(
+                        """
+                        INSERT INTO action_insights
+                        (action_id, action_type, title, description, priority, status,
+                         source_report, source_context, deadline, scheduled_for, result, created_at, completed_at, retry_count, last_error, metadata)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(action_id) DO UPDATE SET
+                            status = excluded.status,
+                            description = excluded.description,
+                            scheduled_for = excluded.scheduled_for,
+                            result = excluded.result,
+                            retry_count = excluded.retry_count,
+                            last_error = excluded.last_error,
+                            metadata = COALESCE(excluded.metadata, action_insights.metadata)
+                    """,
+                        (
+                            action_id,
+                            action_type,
+                            title,
+                            description,
+                            priority,
+                            status,
+                            source_report,
+                            source_context,
+                            deadline,
+                            scheduled_for,
+                            result,
+                            created,
+                            completed_at,
+                            retry_count,
+                            last_error,
+                            metadata,
+                        ),
+                    )
+                else:
+                    raise
 
             return True
 

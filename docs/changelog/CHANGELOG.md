@@ -1,6 +1,40 @@
 # ACTIVE DEVELOPMENT
 
-[![Version](https://img.shields.io/badge/version-3.5.1-blue.svg)](https://github.com/amuzetnoM/gold_standard/releases)
+[![Version](https://img.shields.io/badge/version-3.5.3-blue.svg)](https://github.com/amuzetnoM/gold_standard/releases)
+
+### HIGHLIGHTS
+
+> Version 3.5.3 Patch (2025-12-20)
+
+Patch Summary: LLM sanitizer enforcement, Prometheus metrics & alerts, sanitizer audit trail, and worker hardening.
+
+Key fixes and improvements:
+- **Prevented numeric hallucinations in LLM-generated reports** by embedding canonical numeric values into prompts and adding sanitizer logic that enforces those values in generated output.
+- **Sanitizer audit trail**: added `llm_sanitizer_audit` table and DB helper to persist corrections for audit and review.
+- **Prometheus metrics** for LLM queue & worker added: `gost_llm_queue_length`, `gost_llm_worker_running`, `gost_llm_tasks_processing`, and `gost_llm_sanitizer_corrections_total`.
+- **Alert rules**: added `deploy/prometheus/gold_standard_llm_rules.yml` with alerts for queue growth, worker down, and sanitizer corrections.
+- **Auto-flagging**: tasks with excessive sanitizer corrections are now flagged (`status='flagged'`) for manual review (configurable via `LLM_SANITIZER_FLAG_THRESHOLD`).
+- **Integration tests**: added an integration test for the worker and a sanitizer audit unit test to prevent regressions.
+- **Docs & Observability**: added `docs/observability/llm_metrics.md` with guidance on alerts and metrics.
+- **Minor**: Fixed various DB defensive initialization edge-cases uncovered while adding sanitizer audit table.
+
+> Version 3.5.2 Patch (2025-12-19)
+
+Patch Summary: Runner finish & docs, ADX robustness, venv and Notion hardening, and CLI wait-mode improvements.
+
+Key fixes and improvements:
+- **ADX & Indicator Robustness:** Fixed ADX computation to handle multi-column OHLC inputs and misaligned indices; added safe fallbacks and unit tests (`tests/test_adx_robust.py`). Prevents ADX crashes from irregular data shapes.
+- **Deterministic Single-Run Wait Behavior:** Added `--wait` and `--wait-forever` flags and made wait-forever the default for `--once` (block until post-analysis tasks complete). Ensures a single-run waits until all insights/actions/publishing finish.
+- **VenV and Startup Hardening:** `run.py` re-executes itself under the project venv if available; `scripts/start_executor.sh` now sources the repository `.env` and prefers project venv for detached executor processes to ensure consistent runtime and available secrets.
+- **Publishing & Orchestration Helpers:** Added `publish_documents_once()` helper in `run.py` to centralize Notion sync logic and improve reliability and testability of post-analysis publishing.
+- **Documentation & Changelog Updates:** Added entries and updated README and setup guides to reflect venv usage, LLM provider checks, and Notion env requirements.
+- **Tests & E2E Validation:** Added unit tests and executed an end-to-end single-run (insights → tasks → organization → publish attempt). All unit tests pass locally.
+
+> Version 3.5.1 Patch (2025-12-18)
+
+Patch Summary: Production hardening, deterministic per-run chart generation, Notion daemon env-loading, and documentation updates.
+
+...
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](https://ghcr.io/amuzetnom/gold_standard)

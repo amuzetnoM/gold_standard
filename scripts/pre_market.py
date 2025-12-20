@@ -110,9 +110,25 @@ def build_premarket_prompt(
     gsr = data.get("RATIOS", {}).get("GSR", "N/A")
     vix = data.get("VIX", {}).get("price", "N/A")
 
+    # Add an explicit canonical values block to prevent fabricated numbers
+    canonical_lines = [f"* {k}: ${v.get('price', 'N/A')} (change: {v.get('change', 0):+.2f}%)" for k, v in data.items() if k != 'RATIOS' and isinstance(v, dict)]
+
+    canonical_block = "\n".join(canonical_lines)
+
+    safety_instructions = (
+        "IMPORTANT: Use ONLY the numeric values explicitly provided below and in 'CURRENT MARKET STATE'. "
+        "Do NOT invent, guess, or hallucinate numeric prices. If a value isn't available, write 'N/A'. "
+        "If you need to compute levels (support/stop), compute them using the provided prices and show calculations."
+    )
+
     return f"""
 You are "Gold Standard" - an elite quantitative trading algorithm.
 Generate a comprehensive PRE-MARKET PLAN for {week_info['weekday']}, {week_info['formatted']}.
+
+=== CANONICAL VALUES (DO NOT INVENT NUMBERS) ===
+{canonical_block}
+
+{safety_instructions}
 
 === CURRENT MARKET STATE ===
 {chr(10).join(data_lines)}
@@ -124,7 +140,7 @@ Intermarket:
 
 === ACTIVE POSITIONS ===
 {active_trades_text}
-
+"""
 Performance: {trade_summary['wins']}W / {trade_summary['losses']}L | Win Rate: {trade_summary['win_rate']:.1f}% | Total PnL: ${trade_summary['total_pnl']:.2f}
 
 === RECENT NEWS ===
@@ -255,7 +271,42 @@ def generate_premarket(config: Config, logger, model=None, dry_run: bool = False
         elif model is not None:
             try:
                 response = model.generate_content(prompt)
-                md.append(response.text)
+                generated = response.text
+
+                # Enforce canonical numeric values: replace any incorrect price mentions with canonical data
+                def sanitize_generated(text: str) -> str:
+                    import re
+
+                    gold_price = data.get("GOLD", {}).get("price")
+                    gold_atr = data.get("GOLD", {}).get("atr") or 0
+                    # Support zone calculations used in prompt
+                    atr_stop_width = float(gold_atr) * 2 if gold_atr else 0
+                    suggested_sl = gold_price - atr_stop_width if gold_price else None
+                    support_zone_low = gold_price - (atr_stop_width * 1.5) if gold_price else None
+                    support_zone_high = gold_price - atr_stop_width if gold_price else None
+
+                    # Replace explicit 'Current Gold Price' mentions
+                    if gold_price is not None:
+                        text = re.sub(r"(Current Gold Price:\s*\$)\s*[0-9\.,]+", f"\1{gold_price}", text, flags=re.IGNORECASE)
+
+                        # Replace nearby mentions where gold is referenced with a $<number> if it is off by >5%
+                        def fix_match(m):
+                            full = m.group(0)
+                            num = float(m.group(2).replace(",", "")) if m.group(2) else None
+                            if num and abs((num - gold_price) / gold_price) > 0.05:
+                                return m.group(1) + str(gold_price)
+                            return full
+
+                        text = re.sub(r"(gold[^\n]{0,40}?\$)([0-9\.,]+)", fix_match, text, flags=re.IGNORECASE)
+
+                    # Replace support/stop placeholders if computed
+                    if support_zone_low is not None and support_zone_high is not None and suggested_sl is not None:
+                        text = re.sub(r"\$X,XXX|\$X,XXX|\$X,XXX", f"${int(support_zone_low)}", text)
+
+                    return text
+
+                sanitized = sanitize_generated(generated)
+                md.append(sanitized)
             except Exception as e:
                 logger.error(f"AI generation failed: {e}")
                 md.append(_generate_skeleton_premarket(data, week_info, cortex))

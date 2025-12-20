@@ -45,9 +45,21 @@ METRICS["process_uptime_seconds"] = Gauge("gost_process_uptime_seconds", "Proces
 METRICS["liveness"] = Gauge("gost_liveness", "Liveness probe (1 = alive, 0 = dead)")
 METRICS["readiness"] = Gauge("gost_readiness", "Readiness probe (1 = ready, 0 = not ready)")
 
+# LLM queue / worker metrics
+METRICS["llm_queue_length"] = Gauge("gost_llm_queue_length", "Number of pending LLM tasks")
+METRICS["llm_worker_running"] = Gauge("gost_llm_worker_running", "LLM worker running (1 = running, 0 = stopped)")
+METRICS["llm_tasks_processing"] = Gauge("gost_llm_tasks_processing", "Number of LLM tasks currently processing")
+
 # Internal state
 _server_thread = None
 
+# Sanitizer correction counter (cumulative)
+from prometheus_client import Counter
+try:
+    METRICS["llm_sanitizer_corrections_total"] = Counter("gost_llm_sanitizer_corrections_total", "Total number of sanitizer corrections applied to generated content")
+except Exception:
+    # If METRICS isn't fully initialized when importing, we'll set this later
+    pass
 
 def _health_payload() -> Dict[str, Any]:
     payload = {

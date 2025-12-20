@@ -198,8 +198,10 @@ def test_db(temp_dir: Path) -> Path:
 class TestConfig:
     """Tests for configuration module."""
 
-    def test_llm_config_defaults(self):
+    def test_llm_config_defaults(self, monkeypatch):
         """Test LLM config default values."""
+        # Ensure environment does not override provider for the test
+        monkeypatch.delenv("LLM_PROVIDER", raising=False)
         config = LLMConfig()
 
         assert config.provider == "local"

@@ -56,11 +56,87 @@ def process_task(task: dict, cfg: Config) -> None:
             resp = provider.generate_content(prompt)
             text = getattr(resp, "text", str(resp))
 
-            # Write content to file and update frontmatter
+            # Sanitize generated content using canonical values embedded in prompt
+            def _parse_canonical_from_prompt(p: str):
+                import re
+                values = {}
+                # Look for lines like: '* GOLD: $4362.4'
+                for m in re.finditer(r"\*\s*([A-Z]+)\s*:\s*\$?([0-9\.,]+)", p):
+                    asset = m.group(1).upper()
+                    num = float(m.group(2).replace(",", ""))
+                    values[asset] = num
+                return values
+
+            def _sanitize_text(text: str, canonical: dict):
+                import re
+                corrected = 0
+                notes = []
+
+                def _replace_price(match, canonical_price):
+                    nonlocal corrected
+                    full = match.group(0)
+                    num = float(match.group(2).replace(",", ""))
+                    if abs((num - canonical_price) / canonical_price) > 0.05:
+                        corrected += 1
+                        notes.append(f"Replaced {num} with {canonical_price}")
+                        return match.group(1) + str(canonical_price)
+                    return full
+
+                # For each canonical asset, replace nearby mentions
+                for asset, price in canonical.items():
+                    # Replace patterns like 'Gold: $1234' or 'gold ... $1234'
+                    text = re.sub(rf"(\b{asset}\b[^\n]{{0,40}}\$)([0-9\.,]+)", lambda m, p=price: _replace_price(m, p), text, flags=re.IGNORECASE)
+                    # Replace 'Current Gold Price: $1234' pattern
+                    text = re.sub(rf"(Current\s+{asset.capitalize()}\s+Price:\s*\$)\s*[0-9\.,]+", lambda m, p=price: m.group(1) + str(p), text, flags=re.IGNORECASE)
+
+                return text, corrected, notes
+
+            canonical = _parse_canonical_from_prompt(prompt or "")
+            sanitized_text = text
+            corrections = 0
+            notes = []
+            if canonical:
+                sanitized_text, corrections, notes = _sanitize_text(text, canonical)
+
+            # Persist audit if corrections occurred
             try:
-                # Overwrite file body with AI output and set frontmatter (auto-publish may occur)
+                if corrections:
+                    try:
+                        # Increment Prometheus counter if available
+                        from gold_standard.metrics.server import METRICS
+
+                        if "llm_sanitizer_corrections_total" in METRICS:
+                            METRICS["llm_sanitizer_corrections_total"].inc(corrections)
+                    except Exception:
+                        pass
+
+                    db.save_llm_sanitizer_audit(task_id, corrections, "; ".join(notes))
+
+            except Exception:
+                LOG.exception("Failed to write sanitizer audit for task %s", task_id)
+
+            # If many corrections, flag the report for review instead of auto-publishing
+            flag_threshold = int(os.environ.get("LLM_SANITIZER_FLAG_THRESHOLD", "2"))
+            if corrections >= flag_threshold:
+                LOG.warning("Task %s sanitized with %s corrections - flagging for review", task_id, corrections)
+                try:
+                    # Write sanitized content to file, but mark status as flagged
+                    doc_type = detect_type(os.path.basename(doc_path))
+                    final_content = add_frontmatter(sanitized_text, os.path.basename(doc_path), doc_type=doc_type, ai_processed=True)
+                    # add a flag in frontmatter
+                    final_content = final_content.replace("\n---\n", "\n---\nsanitizer_flagged: true\n", 1)
+                    with open(doc_path, "w", encoding="utf-8") as f:
+                        f.write(final_content)
+                    db.update_llm_task_result(task_id, "flagged", response=sanitized_text, error=None, attempts=attempts)
+                except Exception as e:
+                    LOG.exception("Failed to write flagged report for %s: %s", doc_path, e)
+                    db.update_llm_task_result(task_id, "failed", response=None, error=str(e), attempts=attempts)
+                return
+
+            # Write sanitized content to file and update frontmatter
+            try:
                 doc_type = detect_type(os.path.basename(doc_path))
-                final_content = add_frontmatter(text, os.path.basename(doc_path), doc_type=doc_type, ai_processed=True)
+                final_content = add_frontmatter(sanitized_text, os.path.basename(doc_path), doc_type=doc_type, ai_processed=True)
                 with open(doc_path, "w", encoding="utf-8") as f:
                     f.write(final_content)
             except Exception as e:
@@ -76,8 +152,8 @@ def process_task(task: dict, cfg: Config) -> None:
                 except Exception as e:
                     LOG.warning("Notion publish failed (task=%s): %s", task_id, e)
 
-            db.update_llm_task_result(task_id, "completed", response=text, error=None, attempts=attempts)
-            LOG.info("Task %s completed (generate)", task_id)
+            db.update_llm_task_result(task_id, "completed", response=sanitized_text, error=None, attempts=attempts)
+            LOG.info("Task %s completed (generate) - corrections=%s", task_id, corrections)
 
         elif task_type == "insights":
             # Perform insights extraction and save action insights
@@ -118,11 +194,25 @@ def process_task(task: dict, cfg: Config) -> None:
             db.update_llm_task_result(task_id, "pending", response=None, error=str(e), attempts=attempts)
 
 def main():
+    # Metrics integration (optional)
+    try:
+        from gold_standard.metrics.server import METRICS
+    except Exception:
+        METRICS = None
+
+    # Initialize
     cfg = Config()
     setup_logging(cfg)
     LOG.setLevel(os.environ.get("LLM_WORKER_LOG_LEVEL", "INFO"))
 
     db = get_db()
+
+    # Set running metric
+    if METRICS is not None:
+        try:
+            METRICS["llm_worker_running"].set(1)
+        except Exception:
+            pass
 
     LOG.info("LLM Worker starting (concurrency=%s poll_interval=%s)" % (WORKER_CONCURRENCY, POLL_INTERVAL))
 
@@ -130,11 +220,25 @@ def main():
 
     try:
         while True:
+            # Update queue length metric
+            if METRICS is not None:
+                try:
+                    METRICS["llm_queue_length"].set(db.get_llm_queue_length() or 0)
+                except Exception:
+                    pass
+
             # Claim a batch of tasks (up to TASK_BATCH_SIZE)
             tasks = db.claim_llm_tasks(limit=TASK_BATCH_SIZE)
             if not tasks:
                 time.sleep(POLL_INTERVAL)
                 continue
+
+            # Update processing metric
+            if METRICS is not None:
+                try:
+                    METRICS["llm_tasks_processing"].set(len(tasks))
+                except Exception:
+                    pass
 
             futures = {executor.submit(process_task, t, cfg): t for t in tasks}
             # Wait for current batch to finish but do not block polling forever
@@ -145,9 +249,22 @@ def main():
                     t = futures[fut]
                     LOG.exception("Task %s raised: %s", t.get("id"), e)
 
+            # Reset processing metric
+            if METRICS is not None:
+                try:
+                    METRICS["llm_tasks_processing"].set(0)
+                except Exception:
+                    pass
+
     except KeyboardInterrupt:
         LOG.info("LLM Worker stopping (KeyboardInterrupt)")
     finally:
+        if METRICS is not None:
+            try:
+                METRICS["llm_worker_running"].set(0)
+                METRICS["llm_tasks_processing"].set(0)
+            except Exception:
+                pass
         executor.shutdown(wait=True)
 
 
