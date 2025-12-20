@@ -4,9 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Gold Standard — Artifact Virtual</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="styles.css">
+  <style><!-- Critical fallback: minimal background & text to avoid white flash if CSS fails -->
+    body { background: #071018; color: #dbe9f8; }
+    .lead, .brand { color: #dbe9f8; }
+  </style>
 </head>
 <body>
+  <noscript>
+    <div style="padding:1rem;background:#08121a;color:#dbe9f8;">JavaScript is disabled. For full functionality enable JavaScript.</div>
+  </noscript>
   <div class="app">
     <header class="topbar">
       <div class="brand">Gold Standard</div>
@@ -77,6 +84,6 @@
       <div>© 2025 Artifact Virtual — Gold Standard</div>
     </footer>
   </div>
-  <script src="/scripts.js"></script>
+  <script src="scripts.js"></script>
 </body>
 </html>
