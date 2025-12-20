@@ -36,5 +36,11 @@ Moderation commands (admin-only)
 
 Notes
 -----
+- Subscription commands:
+  - `/subscribe <topic>` — Subscribe to `sanitizer`, `queue`, or `digests`.
+  - `/unsubscribe <topic>` — Remove a subscription.
+  - `/subscriptions` — List your subscriptions.
+  - `/list_subscribers [topic]` — Operator-only; list subscribers.
+
 - All operator actions are recorded in `bot_audit` for transparency.
 - The UI interaction (Approve/Flag/Re-run) is intentionally lightweight to reduce friction and promote rapid triage.

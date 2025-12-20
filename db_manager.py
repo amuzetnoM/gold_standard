@@ -169,6 +169,17 @@ class DatabaseManager:
                     created_at TEXT DEFAULT (datetime('now'))
                 )
             """)
+
+            # Subscriptions table - user subscriptions to topics for alerts
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    UNIQUE(user_id, topic)
+                )
+            """)
             # Persistent LLM tasks queue (ensure created early so tests and scripts can rely on it)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS llm_tasks (
@@ -213,6 +224,59 @@ class DatabaseManager:
                 (user, action, details),
             )
             return cursor.lastrowid
+
+    # ------------------------------------------------------------------
+    # Subscription helpers
+    # ------------------------------------------------------------------
+    def add_subscription(self, user_id: str, topic: str) -> int:
+        """Subscribe a user to a topic. Returns the subscription id."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    "INSERT INTO subscriptions (user_id, topic) VALUES (?, ?)",
+                    (user_id, topic),
+                )
+                return cursor.lastrowid
+            except sqlite3.IntegrityError:
+                # Already subscribed
+                cursor.execute(
+                    "SELECT id FROM subscriptions WHERE user_id = ? AND topic = ?", (user_id, topic)
+                )
+                row = cursor.fetchone()
+                return row["id"] if row else 0
+
+    def remove_subscription(self, user_id: str, topic: str) -> bool:
+        """Remove a subscription for a user and topic."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM subscriptions WHERE user_id = ? AND topic = ?", (user_id, topic))
+            return cursor.rowcount > 0
+
+    def list_subscriptions(self, topic: str = None) -> list:
+        """List subscriptions optionally filtered by topic."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if topic:
+                cursor.execute("SELECT user_id, topic, created_at FROM subscriptions WHERE topic = ? ORDER BY created_at DESC", (topic,))
+            else:
+                cursor.execute("SELECT user_id, topic, created_at FROM subscriptions ORDER BY created_at DESC")
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_user_subscriptions(self, user_id: str) -> list:
+        """Return list of topics a user is subscribed to."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT topic FROM subscriptions WHERE user_id = ?", (user_id,))
+            return [r["topic"] for r in cursor.fetchall()]
+
+    def get_recent_sanitizer_total(self, hours: int = 1) -> int:
+        """Return sum of sanitizer corrections in the last <hours> hours."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT SUM(corrections) as total FROM llm_sanitizer_audit WHERE created_at >= datetime('now', ?)", (f"-{hours} hours",))
+            row = cursor.fetchone()
+            return int(row["total"] or 0)
 
             # Reports table - weekly, monthly, yearly
             cursor.execute("""
