@@ -43,6 +43,12 @@ This runbook details what to do when the LLM sanitizer flags or corrects generat
 - If a `flagged` task corresponds to a published Notion page, treat it as a potential content incident: follow standard incident response, notify stakeholders, and re-publish corrected content.
 - For repeated sanitizer corrections, consider adding a Discord/Slack alert (planned after release).
 
+## Daily reporting
+
+- A daily LLM operations report generator is available: `src/digest_bot/daily_report.py`.
+- Deploy it to run daily (systemd timer example in `docs/virtual_machine/VM_ACCESS.md`) and set `DISCORD_WEBHOOK_URL` in `.env` to point to an ops channel to receive automated daily summaries of queue length, sanitizer corrections, and flagged tasks.
+- Use the daily report as a short observational feed during the 24-hour staging monitor window to spot trends early.
+
 ## Config & Tuning
 
 - `LLM_SANITIZER_FLAG_THRESHOLD` (env var): default 2 — number of corrections that trigger automatic flagging.

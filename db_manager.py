@@ -159,6 +159,31 @@ class DatabaseManager:
                 )
             """)
 
+            # Persistent LLM tasks queue (ensure created early so tests and scripts can rely on it)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS llm_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_path TEXT NOT NULL,
+                    prompt TEXT NOT NULL,
+                    provider_hint TEXT,
+                    status TEXT DEFAULT 'pending',
+                    attempts INTEGER DEFAULT 0,
+                    response TEXT,
+                    error TEXT,
+                    priority TEXT DEFAULT 'normal',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    started_at TEXT,
+                    last_attempt_at TEXT,
+                    completed_at TEXT
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_llm_tasks_status_created ON llm_tasks(status, created_at)")
+            # Migration: add 'task_type' column to distinguish generation vs post-processing tasks
+            try:
+                cursor.execute("ALTER TABLE llm_tasks ADD COLUMN task_type TEXT DEFAULT 'generate'")
+            except sqlite3.OperationalError:
+                pass  # Column likely already exists
+
     def save_llm_sanitizer_audit(self, task_id: int, corrections: int, notes: str = None) -> int:
         """Save a sanitizer audit record."""
         with self._get_connection() as conn:

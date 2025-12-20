@@ -55,6 +55,35 @@
 - A daily healthcheck is installed and enabled via systemd timer: `gold-standard-healthcheck.timer` → `gold-standard-healthcheck.service`.
 - The runner script is `/opt/gold_standard_health_check.sh` (installed and executable) which calls `scripts/health_check.py` and performs a basic restart of the `gold-standard-run-once.service` on failure and triggers Discord alerts via `scripts/notifier.py` (if `DISCORD_WEBHOOK_URL` is set in `.env`).
 - You can run the healthcheck manually: `sudo /opt/gold_standard_health_check.sh` and inspect logs with `journalctl -u gold-standard-healthcheck.service -n 200 --no-pager`.
+- A new daily LLM-operations report generator was added: `src/digest_bot/daily_report.py`.
+  - Usage (dry-run): `python -m digest_bot.daily_report --dry-run` — prints a markdown summary of queue length, sanitizer corrections, flagged tasks and recent errors.
+  - Send to Discord: ensure `DISCORD_WEBHOOK_URL` is set in `.env` (or pass `--webhook <url>`), then run: `python -m digest_bot.daily_report`.
+  - Install as a systemd timer (example):
+
+```ini
+# /etc/systemd/system/gold-standard-daily-llm-report.service
+[Unit]
+Description=Gold Standard daily LLM operations report
+
+[Service]
+Type=oneshot
+User=ali
+WorkingDirectory=/home/ali/worxpace/gold_standard
+ExecStart=/usr/bin/env python -m digest_bot.daily_report
+
+# /etc/systemd/system/gold-standard-daily-llm-report.timer
+[Unit]
+Description=Run Gold Standard daily LLM operations report daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+- You can test sending with a single run: `sudo systemctl start gold-standard-daily-llm-report.service` and inspect the logs with `journalctl -u gold-standard-daily-llm-report.service -n 200 --no-pager`.
 - We added a smoke-test CI workflow (`.github/workflows/smoke.yml`): set `SMOKE_NOTION_API_KEY` and `SMOKE_NOTION_DATABASE_ID` in GitHub Secrets to enable weekly smoke publishes.
 - **Host tools**: `git`, `docker`, `docker-compose`, `python3`, and `gcc` are already installed and ready.
 
