@@ -9,7 +9,8 @@ LOG = logging.getLogger("digest_bot.discord.reporting")
 class ReportingCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.channel_id = os.getenv("DISCORD_OPS_CHANNEL_ID")
+        # Prefer a dedicated digest channel if present
+        self.channel_id = os.getenv("DISCORD_DIGEST_CHANNEL_ID") or os.getenv("DISCORD_OPS_CHANNEL_ID")
         # Background task optional; disabled unless env set
         if os.getenv("DISCORD_ENABLE_DAILY_REPORT") == "1":
             self.daily_report.start()
