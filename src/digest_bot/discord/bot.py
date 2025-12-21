@@ -483,6 +483,40 @@ class DigestDiscordBot(commands.Bot):
                     logger.info("Digest posted successfully!")
                 else:
                     logger.warning(f"Digest generation failed: {result.error}")
+
+                    # Fallback: use deterministic, DB-based report to ensure something useful posts
+                    try:
+                        from ..daily_report import build_report
+                        from db_manager import DatabaseManager
+
+                        logger.info("Attempting deterministic fallback digest from DB")
+                        db = DatabaseManager()
+                        fallback_msg = build_report(db, hours=24)
+
+                        if fallback_msg:
+                            writer = DigestWriter(self.config)
+                            # Create a pseudo DigestResult-like object
+                            class FR:
+                                content = fallback_msg
+                                metadata = {"fallback": True}
+
+                            writer.write(FR, today)
+
+                            embed = self.create_digest_embed(
+                                f"📊 Daily Digest (Fallback) — {today.isoformat()}",
+                                fallback_msg,
+                                {"fallback": True},
+                            )
+
+                            await self.post_digest(
+                                f"**Daily Market Intelligence (Fallback) for {today.strftime('%A, %B %d, %Y')}**",
+                                embed=embed,
+                            )
+
+                            self._last_digest_date = today
+                            logger.info("Fallback digest posted successfully")
+                    except Exception:
+                        logger.exception("Fallback digest generation/post failed")
             else:
                 logger.info("Not all inputs ready yet")
 
