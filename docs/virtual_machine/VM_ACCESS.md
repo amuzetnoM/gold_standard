@@ -92,6 +92,17 @@ WantedBy=timers.target
 - Publishing: **Partial** — I attempted to force-publish a generated report but the Notion API returned a 400 error ("Status is expected to be status."). I implemented code fallbacks to retry with different property encodings and a minimal payload, and also confirmed creating a minimal page (title only) works.
 - **Action required**: please **share the Notion database** ("Precious Metals Complex") with your Notion integration (the integration linked to `NOTION_API_KEY`) from the Notion UI (Share → Invite → select the integration). This will ensure the integration has the correct permissions and let me re-run the publishing process end-to-end.
 
+### VM Verification Checklist
+
+A short verification checklist has been added to help you confirm the VM is healthy and ready to run the full Gold Standard stack unattended. See `VM_VERIFICATION_CHECKLIST.md` for a comprehensive, operator-friendly list of checks and commands (disk, services, timers, backups, metrics, and recovery steps).
+
+Inline quick checks:
+- [ ] Boot & systemd health (`sudo journalctl -b --no-pager | tail -n 200`)
+- [ ] Disk usage (`df -h /` / `df -i /`)
+- [ ] LLM worker (`systemctl status gold-standard-llm-worker.service`)
+- [ ] Discord bot (`systemctl status gold-standard-discord-bot.service`)
+- [ ] Daily report timer (`systemctl status gold-standard-daily-llm-report.timer`)
+
 ### Notes & recommendations
 - The service account has been removed, so future metadata or IAM changes will require an owner or another admin account (e.g., `ali.shakil.backup@gmail.com`) or re-creation of an admin SA.
 - For long-term multi-user management, consider enabling **OS Login** and granting IAM-based SSH roles (`roles/compute.osLogin` or `roles/compute.osAdminLogin`).
