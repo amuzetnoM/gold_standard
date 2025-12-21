@@ -389,6 +389,14 @@ class ServerBlueprint:
                                 "Bot Admin": {"view_channel": True, "send_messages": True},
                             },
                         ),
+                        ChannelSpec(
+                            name="🔧-service",
+                            topic="🔧 Private service/test channel for operator posts (visible to Bot Admins).",
+                            permission_overwrites={
+                                "@everyone": {"view_channel": False},
+                                "Bot Admin": {"view_channel": True, "send_messages": True},
+                            },
+                        ),
                     ],
                     permission_overwrites={
                         "@everyone": {"view_channel": False},
