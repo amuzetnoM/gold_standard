@@ -256,6 +256,40 @@ class ChannelSpec:
         )
 
     @classmethod
+    def reports_channel(cls) -> "ChannelSpec":
+        """Create an admin-only reports channel where all reports are routed."""
+        return cls(
+            name="📥-reports",
+            channel_type=ChannelType.TEXT,
+            topic="📥 Central admin inbox for generated reports (premarket, journal, research). Visible to Bot Admins only.",
+            position=11,
+            slowmode=0,
+            permission_overwrites={
+                "@everyone": {"view_channel": False},
+                "Bot Admin": {"view_channel": True, "send_messages": True},
+                "operators": {"view_channel": True, "send_messages": True},
+                "Digest Bot": {"send_messages": True},
+            },
+            reason="Admin inbox for generated reports",
+        )
+
+    @classmethod
+    def commands_codex_channel(cls) -> "ChannelSpec":
+        """Create a public command codex channel for users to learn bot commands."""
+        return cls(
+            name="📋-bot-commands",
+            channel_type=ChannelType.TEXT,
+            topic="📋 Bot command codex — how to use bot services. Readable by all users.",
+            position=6,
+            slowmode=0,
+            permission_overwrites={
+                "@everyone": {"view_channel": True, "send_messages": False},
+                "Digest Bot": {"send_messages": True},
+            },
+            reason="Public command codex for bot usage",
+        )
+
+    @classmethod
     def alerts_channel(cls) -> "ChannelSpec":
         """Create alerts channel."""
         return cls(
@@ -373,6 +407,7 @@ class ServerBlueprint:
                                 "@everyone": {"send_messages": False},
                             },
                         ),
+                        ChannelSpec.commands_codex_channel(),
                     ],
                     reason="Category for community interaction",
                 ),
@@ -389,6 +424,7 @@ class ServerBlueprint:
                                 "Bot Admin": {"view_channel": True, "send_messages": True},
                             },
                         ),
+                        ChannelSpec.reports_channel(),
                         ChannelSpec(
                             name="🔧-service",
                             topic="🔧 Private service/test channel for operator posts (visible to Bot Admins).",
@@ -695,6 +731,48 @@ class SelfGuide:
                 "channels": analysis["missing_channels"],
             }
             return report
+
+        # Clean up duplicate "service" channels and known mis-typed names before applying blueprint
+        try:
+            # 1) Remove obvious mis-typed channel names
+            misnames = ["sevuce", "sevice", "sevre", "sevrce"]
+            for ch in list(guild.text_channels):
+                if ch.name in misnames:
+                    try:
+                        await ch.delete(reason="Cleanup mis-typed duplicate channel by SelfGuide")
+                        logger.info(f"Deleted mis-typed channel: {ch.name}")
+                        report["channels_created"].append(f"deleted:{ch.name}")
+                    except Exception as e:
+                        report["errors"].append(f"Failed to delete channel {ch.name}: {e}")
+
+            # 2) Detect duplicate 'service' channels (keep canonical '🔧-service')
+            service_candidates = []
+            import re
+
+            for ch in list(guild.text_channels):
+                # Normalize: remove non-letters and lower-case
+                norm = re.sub(r"[^a-z]", "", ch.name.lower())
+                if norm == "service":
+                    service_candidates.append(ch)
+
+            if len(service_candidates) > 1:
+                # Prefer to keep the canonical '🔧-service' if present
+                keep = next((c for c in service_candidates if c.name == "🔧-service"), None)
+                if keep is None:
+                    keep = service_candidates[0]
+
+                for ch in service_candidates:
+                    if ch is keep:
+                        continue
+                    try:
+                        await ch.delete(reason="Remove duplicate service channel; keep canonical '🔧-service'")
+                        logger.info(f"Deleted duplicate service channel: {ch.name}")
+                        report["channels_created"].append(f"deleted:{ch.name}")
+                    except Exception as e:
+                        report["errors"].append(f"Failed to delete channel {ch.name}: {e}")
+
+        except Exception as e:
+            logger.warning(f"Cleanup step failed: {e}")
 
         # Create roles first
         for role_spec in self.blueprint.roles:

@@ -89,7 +89,7 @@ class LLMConfig:
     """LLM provider configuration."""
 
     # Provider selection: "local" (llama.cpp) or "ollama"
-    provider: Literal["local", "ollama"] = field(default_factory=lambda: _env("LLM_PROVIDER", "local"))
+    provider: Literal["local", "ollama", "gemini"] = field(default_factory=lambda: _env("LLM_PROVIDER", "gemini"))
 
     # llama.cpp settings
     local_model_path: Path = field(
@@ -104,6 +104,11 @@ class LLMConfig:
     # Ollama settings
     ollama_host: str = field(default_factory=lambda: _env("OLLAMA_HOST", "http://localhost:11434"))
     ollama_model: str = field(default_factory=lambda: _env("OLLAMA_MODEL", "mistral"))
+    ollama_timeout: float = field(default_factory=lambda: _env_float("OLLAMA_TIMEOUT", 20.0))
+
+    # Gemini settings (cloud primary provider)
+    gemini_model: str = field(default_factory=lambda: _env("GEMINI_MODEL", "models/gemini-pro-latest"))
+    gemini_rate_limit_sec: int = field(default_factory=lambda: _env_int("GEMINI_RATE_LIMIT_SEC", 60))
 
     # Generation settings
     max_tokens: int = field(default_factory=lambda: _env_int("LLM_MAX_TOKENS", 768))
@@ -268,6 +273,13 @@ class Config:
                     f"  Model: {self.llm.local_model_path.name}",
                     f"  GPU Layers: {self.llm.local_gpu_layers}",
                     f"  Context: {self.llm.local_context}",
+                ]
+            )
+        elif self.llm.provider == "gemini":
+            lines.extend(
+                [
+                    f"  Model: {self.llm.gemini_model}",
+                    f"  Rate Limit: {self.llm.gemini_rate_limit_sec}s",
                 ]
             )
         else:
