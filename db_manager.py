@@ -205,6 +205,19 @@ class DatabaseManager:
             except sqlite3.OperationalError:
                 pass  # Column likely already exists
 
+            # Ensure model_usage table exists for pruning/metrics
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS model_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_path TEXT UNIQUE NOT NULL,
+                    name TEXT,
+                    size_gb REAL,
+                    last_used TEXT,
+                    usage_count INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
     def save_llm_sanitizer_audit(self, task_id: int, corrections: int, notes: str = None) -> int:
         """Save a sanitizer audit record."""
         with self._get_connection() as conn:
@@ -270,6 +283,54 @@ class DatabaseManager:
             cursor.execute("SELECT topic FROM subscriptions WHERE user_id = ?", (user_id,))
             return [r["topic"] for r in cursor.fetchall()]
 
+    # ------------------------------------------------------------------
+    # Model usage helpers
+    # ------------------------------------------------------------------
+    def record_model_usage(self, model_path: str, name: str | None = None, size_gb: float | None = None) -> None:
+        """Insert or update model usage metadata and set last_used timestamp."""
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO model_usage (model_path, name, size_gb, last_used, usage_count) VALUES (?, ?, ?, datetime('now'), 1) "
+                "ON CONFLICT(model_path) DO UPDATE SET last_used = datetime('now'), usage_count = usage_count + 1, name = COALESCE(?, name), size_gb = COALESCE(?, size_gb)",
+                (model_path, name, size_gb, name, size_gb),
+            )
+
+    def get_unused_models(self, days_threshold: int = 30, keep_list: list[str] | None = None, min_keep: int = 1) -> list:
+        """Return list of model rows eligible for pruning.
+
+        - days_threshold: models not used in the last N days are eligible
+        - keep_list: names/paths to exclude from deletion
+        - min_keep: keep at least this many models even if older than threshold
+        """
+        keep_list = keep_list or []
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT model_path, name, size_gb, last_used, usage_count FROM model_usage ORDER BY last_used DESC"
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+
+        # filter by keep_list
+        filtered = []
+        for r in rows:
+            name = (r.get("name") or Path(r.get("model_path")).stem).lower()
+            path = str(r.get("model_path") or "")
+            if any(k.lower() in name or k.lower() in path for k in keep_list):
+                continue
+            filtered.append(r)
+
+        # eligible where last_used is NULL or older than threshold
+        import datetime
+
+        cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=days_threshold)).isoformat()
+        eligible = [r for r in reversed(filtered) if (r.get("last_used") is None or str(r.get("last_used")) < cutoff)]
+
+        # Keep at least min_keep models (the most recently used ones) - remove from eligible if needed
+        total_models = len(filtered)
+        to_remove = eligible
+        to_remove = to_remove[: max(0, total_models - min_keep)] if total_models > min_keep else []
+        return to_remove
     def get_recent_sanitizer_total(self, hours: int = 1) -> int:
         """Return sum of sanitizer corrections in the last <hours> hours."""
         with self._get_connection() as conn:
@@ -398,6 +459,27 @@ class DatabaseManager:
                 pass  # Columns already exist
 
             # System configuration table - stores runtime settings
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_config (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    value TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Model usage table - track GGUF model usage for pruning and metrics
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS model_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_path TEXT UNIQUE NOT NULL,
+                    name TEXT,
+                    size_gb REAL,
+                    last_used TEXT,
+                    usage_count INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS system_config (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

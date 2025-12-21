@@ -38,6 +38,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--confirm", action="store_true", help="Actually delete candidate models")
     parser.add_argument("--keep", type=str, help="Comma-separated model names to keep (overrides env KEEP_LOCAL_MODELS)")
+    parser.add_argument("--prune-days", type=int, default=0, help="If set (>0), consult DB and only candidates not used in N days are eligible")
+    parser.add_argument("--min-keep", type=int, default=1, help="Minimum number of models to keep when pruning")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -52,8 +54,21 @@ def main():
 
     candidates = candidates_to_remove(models, keep)
 
+    # If pruning via DB requested, intersect with DB-derived unused models
+    if args.prune_days and args.prune_days > 0:
+        try:
+            from db_manager import DatabaseManager
+
+            db = DatabaseManager()
+            db_candidates = db.get_unused_models(days_threshold=args.prune_days, keep_list=keep, min_keep=args.min_keep)
+            # db_candidates are rows with model_path; filter our candidates list
+            db_paths = {r.get('model_path') for r in db_candidates}
+            candidates = [m for m in candidates if str(m.get('path')) in db_paths]
+        except Exception:
+            LOG.exception("Failed to consult DB for pruning; falling back to name-based candidates")
+
     if not candidates:
-        LOG.info("No models match deletion criteria (keep=%s).", keep)
+        LOG.info("No models match deletion criteria (keep=%s, prune-days=%s).", keep, args.prune_days)
         return
 
     LOG.info("Models found: %s", [m.get('name') for m in models])

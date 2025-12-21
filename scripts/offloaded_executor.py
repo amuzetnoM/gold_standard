@@ -55,16 +55,37 @@ signal.signal(signal.SIGINT, handle_sigterm)
 signal.signal(signal.SIGTERM, handle_sigterm)
 
 
-def choose_fast_model(llm: LocalLLM):
-    """Choose a fast model heuristic: prefer names in KEEP_LOCAL_MODELS, then small size, then 'mini' hints."""
+def choose_fast_model(llm: LocalLLM, db: DatabaseManager | None = None, keep_list: list[str] | None = None):
+    """Choose a fast model heuristic:
+    - Prefer names in KEEP_LOCAL_MODELS or provided keep_list
+    - Prefer recently used models (if DB provided)
+    - Prefer name hints (mini/tiny/fast) and small size
+    """
     models = llm.find_models()
     if not models:
         return None
 
-    # If KEEP_LOCAL_MODELS provided, prefer first found match
-    for keep in KEEP_LOCAL_MODELS:
+    keep_list = [k.lower() for k in (keep_list or KEEP_LOCAL_MODELS or []) if k]
+
+    # If DB provided, prefer recently used models present in DB
+    if db:
+        try:
+            with db._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT model_path, last_used FROM model_usage ORDER BY last_used DESC")
+                used = [r["model_path"] for r in cur.fetchall()]
+                for path in used:
+                    for m in models:
+                        if str(m.get("path")) == str(path):
+                            return m["path"]
+        except Exception:
+            # DB issues shouldn't break selection
+            pass
+
+    # Prefer keep_list
+    for keep in keep_list:
         for m in models:
-            if keep.lower() in m.get("name", "").lower() or keep.lower() in str(m.get("path", "")).lower():
+            if keep in m.get("name", "").lower() or keep in str(m.get("path", "")).lower():
                 return m["path"]
 
     # Prefer name hints
@@ -120,6 +141,12 @@ def poll_once(db: DatabaseManager, llm: LocalLLM, max_tasks: int = DEFAULT_MAX_T
             result = llm.generate(prompt, max_tokens=1024)
             LOG.info("Task %s completed (len=%d)", task_id, len(result))
 
+            # Record model usage in DB if possible
+            try:
+                db.record_model_usage(llm._config.model_path or getattr(llm, '_model_name', ''), name=getattr(llm, 'model_name', None), size_gb=None)
+            except Exception:
+                pass
+
             with db._get_connection() as conn:
                 cur = conn.cursor()
                 cur.execute(
@@ -127,8 +154,32 @@ def poll_once(db: DatabaseManager, llm: LocalLLM, max_tasks: int = DEFAULT_MAX_T
                     (result, datetime.utcnow().isoformat(), task_id),
                 )
         except Exception as e:
-            LOG.exception("Task %s failed: %s", task_id, e)
-            # Retry if attempts < max_attempts
+            LOG.exception("Task %s failed on model %s: %s", task_id, getattr(llm, 'model_name', None), e)
+
+            # If the failure looks like a model fault, attempt one model reload/swap before giving up
+            tried_reload = False
+            try:
+                llm.unload()
+                alt_model = choose_fast_model(llm, db=db)
+                if alt_model and str(alt_model) != str(getattr(llm, '_model_name', '')):
+                    LOG.info("Attempting to reload alternative model: %s", alt_model)
+                    if llm.load_model(alt_model):
+                        LOG.info("Reloaded model %s, retrying task %s", alt_model, task_id)
+                        tried_reload = True
+                        result = llm.generate(prompt, max_tokens=1024)
+                        with db._get_connection() as conn:
+                            cur = conn.cursor()
+                            cur.execute(
+                                "UPDATE llm_tasks SET status = 'done', response = ?, completed_at = ? WHERE id = ?",
+                                (result, datetime.utcnow().isoformat(), task_id),
+                            )
+            except Exception:
+                LOG.exception("Retry after model reload failed for task %s", task_id)
+
+            if tried_reload:
+                continue
+
+            # Retry at task level if attempts < max_attempts
             if attempts + 1 < max_attempts:
                 with db._get_connection() as conn:
                     cur = conn.cursor()
@@ -151,21 +202,75 @@ def run_loop(db_path: Path, poll_s: int = DEFAULT_POLL_S):
     db = DatabaseManager(db_path)
     llm = LocalLLM()
 
-    # Choose a fast GGUF model and load
-    model = choose_fast_model(llm)
-    if not model:
-        LOG.warning("No local GGUF models found; offloaded executor won't run until a model is available")
-    else:
-        if llm.load_model(model):
-            LOG.info("Loaded offload model: %s", llm.model_name)
-        else:
-            LOG.warning("Failed to load chosen offload model: %s", model)
+    # Choose and attempt to load a fast GGUF model with retry/backoff
+    attempts = 0
+    model = None
+    while attempts < 3 and running:
+        model = choose_fast_model(llm, db=db)
+        if not model:
+            LOG.warning("No local GGUF models found; offloaded executor won't run until a model is available")
+            time.sleep(60)
+            attempts += 1
+            continue
+
+        try:
+            if llm.load_model(model):
+                LOG.info("Loaded offload model: %s", llm.model_name)
+                # Record usage
+                try:
+                    db.record_model_usage(model, name=llm.model_name)
+                except Exception:
+                    LOG.debug("Failed to record model usage (DB)")
+                break
+            else:
+                LOG.warning("Failed to load chosen offload model: %s", model)
+        except Exception:
+            LOG.exception("Exception while loading model %s", model)
+        attempts += 1
+        time.sleep(5 * attempts)
+
+    # Main loop: process tasks and periodically check for pruning requests
+    prune_check_counter = 0
+    AUTO_PRUNE_DAYS = int(os.environ.get("AUTO_PRUNE_DAYS", "0"))
+    AUTO_PRUNE_CONFIRM = os.environ.get("AUTO_PRUNE_CONFIRM", "0") in ("1", "true", "yes")
+    AUTO_PRUNE_MIN_KEEP = int(os.environ.get("AUTO_PRUNE_MIN_KEEP", "1"))
 
     while running:
         try:
             worked = poll_once(db, llm)
+            prune_check_counter += 1
+
+            # If no work, sleep a bit
             if worked == 0:
                 time.sleep(poll_s)
+
+            # Periodically (every 10 cycles) check auto-prune settings
+            if AUTO_PRUNE_DAYS > 0 and prune_check_counter >= 10:
+                prune_check_counter = 0
+                try:
+                    to_remove = db.get_unused_models(days_threshold=AUTO_PRUNE_DAYS, keep_list=KEEP_LOCAL_MODELS, min_keep=AUTO_PRUNE_MIN_KEEP)
+                    if to_remove:
+                        LOG.info("Auto-prune candidates: %s", [r.get('name') for r in to_remove])
+                        if AUTO_PRUNE_CONFIRM:
+                            # Attempt to delete files safely (move to .model_trash then unlink)
+                            trash_dir = Path(PROJECT_ROOT) / ".model_trash"
+                            trash_dir.mkdir(parents=True, exist_ok=True)
+                            for r in to_remove:
+                                p = Path(r.get("model_path"))
+                                if not p.exists():
+                                    LOG.info("Model not found (skipping): %s", p)
+                                    continue
+                                try:
+                                    dst = trash_dir / p.name
+                                    p.rename(dst)
+                                    LOG.info("Pruned model moved to trash: %s", dst)
+                                except Exception:
+                                    LOG.exception("Failed to move model to trash: %s", p)
+                        else:
+                            LOG.info("Auto-prune dry-run (AUTO_PRUNE_CONFIRM not set); no files removed")
+                except Exception:
+                    LOG.exception("Auto-prune check failed")
+
         except Exception:
             LOG.exception("Error in offloaded executor main loop")
             time.sleep(max(poll_s, 5))
