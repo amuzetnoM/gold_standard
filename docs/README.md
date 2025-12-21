@@ -17,7 +17,8 @@
 ![FUCK IT · SHIP IT](https://img.shields.io/badge/FUCK%20IT-SHIP%20IT-2f2f2f?style=for-the-badge&labelColor=6f42c1&logoColor=white)
 
 > **Precious Metals Intelligence Complex**
-> A System for Quantitative Analysis
+
+ *Quantitative Analysis System*
 
 A comprehensive end-to-end system combining real-time market data, technical indicators, economic calendar intelligence, and artificial intelligence to generate structured trading reports for gold and intermarket assets.
 
@@ -32,9 +33,9 @@ A comprehensive end-to-end system combining real-time market data, technical ind
 
 <!-- Tech Stack -->
 [![Python](https://img.shields.io/badge/python-3.10--3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![Gemini](https://img.shields.io/badge/Google%20Gemini-AI-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
-[![SQLite](https://img.shields.io/badge/Database-SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-
+[![SQLite](https://img.shields.io/badge/SQLite-3.0-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://www.sqlite.org/index.html)
+[![Docker](https://img.shields.io/badge/docker-20.10-blue?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
+[![GitHub Actions](https://img.shields.io/badge/github%20actions-automated%20ci%2Fcd-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/amuzetnoM/gold_standard/actions)
 
 <!-- Meta -->
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
