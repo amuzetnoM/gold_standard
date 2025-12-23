@@ -687,6 +687,19 @@ Be specific and data-driven. Target 300-500 words."""
                 except Exception as e:
                     result_data["dxy_error"] = str(e)
 
+        # Check for gold price requests explicitly
+        if "gold" in combined or "gold price" in combined or "gc=f" in combined or "spot gold" in combined:
+            if yf:
+                try:
+                    gc = yf.Ticker("GC=F")
+                    hist = gc.history(period="5d")
+                    if not hist.empty:
+                        result_data.setdefault("gold", {})
+                        result_data["gold"]["current"] = float(hist["Close"].iloc[-1])
+                        result_data["gold"]["previous"] = float(hist["Close"].iloc[-2]) if len(hist) > 1 else None
+                except Exception as e:
+                    result_data["gold_error"] = str(e)
+
         if result_data:
             # Save data to file
             filename = f"data_fetch_{action.action_id}_{date.today()}.json"
@@ -918,6 +931,23 @@ Provide structured analysis:
                     }
                 except (ValueError, IndexError) as e:
                     self.logger.debug(f"Could not parse risk/reward levels: {e}")
+
+        # Baseline / scenario recalculation fallback
+        if "baseline" in combined or "recalculat" in combined or "scenario" in combined:
+            # Attempt a simple baseline correction using recent gold closes
+            if yf:
+                try:
+                    gc = yf.Ticker("GC=F")
+                    hist = gc.history(period="5d")
+                    if not hist.empty:
+                        current = float(hist["Close"].iloc[-1])
+                        previous = float(hist["Close"].iloc[-2]) if len(hist) > 1 else None
+                        result_data.setdefault("baseline_correction", {})
+                        result_data["baseline_correction"]["current_price"] = current
+                        result_data["baseline_correction"]["previous_close"] = previous
+                        result_data["baseline_correction"]["note"] = "Baseline adjusted using recent GC=F closes"
+                except Exception as e:
+                    result_data["baseline_error"] = str(e)
 
         if result_data:
             # Save calculations
