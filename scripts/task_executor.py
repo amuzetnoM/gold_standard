@@ -57,6 +57,17 @@ try:
 except ImportError:
     yf = None
 
+# Ensure compatibility shim: some yfinance builds expose `download`, others only Ticker.history
+if yf is not None and not hasattr(yf, "download"):
+    def _yf_download(ticker, *args, **kwargs):
+        try:
+            t = yf.Ticker(ticker)
+            return t.history(*args, **kwargs)
+        except Exception as _err:  # pragma: no cover - defensive fallback
+            raise AttributeError("yfinance module missing download compatibility") from _err
+
+    yf.download = _yf_download
+
 # Ensure .env is loaded so Notion/API keys are available to inline task executor
 try:
     from gold_standard.utils.env_loader import load_env

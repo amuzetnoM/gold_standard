@@ -97,9 +97,12 @@ def gather_model_stats(llm: LocalLLM, db: DatabaseManager) -> dict:
 
 
 def build_embed(service_statuses: list[dict], db_stats: dict, model_stats: dict) -> dict:
-    now = datetime.utcnow().isoformat() + "Z"
+    from datetime import timezone
+    now = datetime.now(timezone.utc).isoformat() + "Z"
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
     embed = {
-        "title": f"System Health — {datetime.utcnow().date().isoformat()}",
+        "title": f"System Health — {now.date().isoformat()}",
         "description": f"Automated system health summary for {platform.node()}",
         "color": 0x00AAFF,
         "fields": [],

@@ -47,14 +47,47 @@ def process_task(task: dict, cfg: Config) -> None:
         task_type = task.get("task_type", "generate")
 
         if task_type == "generate":
-            provider = create_llm_provider(cfg, LOG)
-            if not provider:
-                raise RuntimeError("No LLM provider available")
+            provider_hint = task.get("provider_hint")
 
-            # Perform generation with a local timeout (worker enforces wall time)
-            # Provider-level timeouts are respected (OLLAMA_TIMEOUT_S, etc.).
-            resp = provider.generate_content(prompt)
-            text = getattr(resp, "text", str(resp))
+            # Honor provider_hint when present
+            if provider_hint == "gemini_only":
+                try:
+                    from main import GeminiProvider
+
+                    gem = GeminiProvider(cfg.GEMINI_MODEL)
+                    resp = gem.generate_content(prompt)
+                    text = getattr(resp, "text", str(resp))
+                except Exception as e:
+                    LOG.exception("Gemini-only generation failed for task %s: %s", task_id, e)
+                    # Mark task failed (no fallback per 'gemini_only' contract)
+                    db.update_llm_task_result(task_id, "failed", response=None, error=str(e), attempts=attempts)
+                    return
+
+            elif provider_hint in ("ollama_slow", "ollama_offload"):
+                try:
+                    # Use the digest-bot Ollama provider which accepts a custom timeout
+                    from digest_bot.llm.ollama import OllamaProvider as OllamaSlowProvider
+
+                    ol = OllamaSlowProvider(host=cfg.OLLAMA_HOST, model=cfg.OLLAMA_MODEL, timeout=None)
+                    resp = ol.generate(prompt)
+                    text = getattr(resp, "text", str(resp))
+                except Exception as e:
+                    LOG.exception("Ollama slow generation failed for task %s: %s", task_id, e)
+                    if attempts >= MAX_RETRIES:
+                        db.update_llm_task_result(task_id, "failed", response=None, error=str(e), attempts=attempts)
+                    else:
+                        db.update_llm_task_result(task_id, "pending", response=None, error=str(e), attempts=attempts)
+                    return
+
+            else:
+                provider = create_llm_provider(cfg, LOG)
+                if not provider:
+                    raise RuntimeError("No LLM provider available")
+
+                # Perform generation with a local timeout (worker enforces wall time)
+                # Provider-level timeouts are respected (OLLAMA_TIMEOUT_S, etc.).
+                resp = provider.generate_content(prompt)
+                text = getattr(resp, "text", str(resp))
 
             # Sanitize generated content using canonical values embedded in prompt
             def _parse_canonical_from_prompt(p: str):

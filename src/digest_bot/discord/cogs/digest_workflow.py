@@ -2,10 +2,58 @@ from __future__ import annotations
 
 import logging
 import os
-import discord
-from discord.ext import commands
-from discord import ButtonStyle
-from discord.ui import View
+try:
+    import discord
+    from discord.ext import commands
+    from discord import ButtonStyle
+    from discord.ui import View
+except Exception:
+    # Provide lightweight fallbacks for environments without discord.py to allow test collection
+    discord = None
+
+    class ButtonStyle:
+        green = "green"
+        grey = "grey"
+        blurple = "blurple"
+
+    class View:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _DummyUI:
+        @staticmethod
+        def button(label=None, style=None):
+            def decorator(fn):
+                return fn
+
+            return decorator
+
+    # A minimal 'commands' stub with required decorators and Cog base class
+    class _DummyCommands:
+        class Cog:
+            pass
+
+        @staticmethod
+        def command(name=None):
+            def decorator(fn):
+                return fn
+
+            return decorator
+
+        @staticmethod
+        def has_role(role_name):
+            def decorator(fn):
+                return fn
+
+            return decorator
+
+    commands = _DummyCommands()
+
+    # Provide a small ui namespace compatible with usage: discord.ui.button
+    class _DummyDiscord:
+        ui = _DummyUI()
+
+    discord = _DummyDiscord()
 
 LOG = logging.getLogger("digest_bot.discord.digest_workflow")
 

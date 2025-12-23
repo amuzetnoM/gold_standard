@@ -37,6 +37,8 @@ try:
     NOTION_AVAILABLE = True
 except ImportError:
     NOTION_AVAILABLE = False
+    # Provide a placeholder Client attribute so tests can monkeypatch this module
+    Client = None
     print("notion-client not installed. Run: pip install notion-client")
 
 try:
@@ -213,11 +215,13 @@ class NotionPublisher:
     """Publish Gold Standard reports to Notion."""
 
     def __init__(self, config: NotionConfig = None):
-        if not NOTION_AVAILABLE:
+        # Allow tests to inject a fake Client into this module via monkeypatching.
+        if not NOTION_AVAILABLE and Client is None:
             raise ImportError("notion-client package not installed")
 
         self.config = config or NotionConfig.from_env()
-        self.client = Client(auth=self.config.api_key)
+        # Initialize the notion client (may be a real client or a monkeypatched fake)
+        self.client = Client(auth=self.config.api_key) if Client is not None else None
 
     def _get_database_properties(self) -> Dict[str, Any]:
         """Return data-source properties if available, otherwise fall back to database properties.
@@ -935,16 +939,20 @@ class NotionPublisher:
         # Check if file has already been synced (and hasn't changed)
         if DB_AVAILABLE and not force:
             db = get_db()
-            if db.is_file_synced(str(path)):
-                existing = db.get_notion_page_for_file(str(path))
-                return {
-                    "page_id": existing.get("notion_page_id", ""),
-                    "url": existing.get("notion_url", ""),
-                    "type": existing.get("doc_type", "notes"),
-                    "tags": [],
-                    "skipped": True,
-                    "reason": "File unchanged since last sync",
-                }
+            try:
+                if db.is_file_synced(str(path)):
+                    existing = db.get_notion_page_for_file(str(path))
+                    return {
+                        "page_id": existing.get("notion_page_id", ""),
+                        "url": existing.get("notion_url", ""),
+                        "type": existing.get("doc_type", "notes"),
+                        "tags": [],
+                        "skipped": True,
+                        "reason": "File unchanged since last sync",
+                    }
+            except Exception:
+                # If DB or notion_sync table is unavailable, proceed to acquire lock and attempt publish
+                pass
 
         # Acquire per-file publish lock to avoid concurrent publishes creating duplicates
         # Ensure locks live under the project cache directory to avoid trying to

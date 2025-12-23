@@ -22,6 +22,10 @@ class DummyProvider:
 
 
 def test_worker_process_generate_and_insights(tmp_path, monkeypatch):
+    # Use an isolated DB per test to avoid cross-test interference
+    test_db = tmp_path / "gs_test.db"
+    monkeypatch.setenv("GOLD_STANDARD_TEST_DB", str(test_db))
+
     # Prepare an isolated report file
     rpt = tmp_path / "int_test_premarket.md"
     rpt.write_text("# INT TEST PLACEHOLDER\n")

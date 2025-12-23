@@ -12,6 +12,14 @@
 # ══════════════════════════════════════════════════════════════════════════════
 import yfinance as yf
 
+# Compatibility shim for yfinance versions without `download`
+if yf is not None and not hasattr(yf, "download"):
+    def _yf_download(ticker, *args, **kwargs):
+        t = yf.Ticker(ticker)
+        return t.history(*args, **kwargs)
+
+    yf.download = _yf_download
+
 if __name__ == "__main__":
     df = yf.download("GC=F", period="5d", interval="1d", progress=False)
     if not df.empty:

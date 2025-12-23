@@ -22,6 +22,10 @@ class BadPriceProvider:
 
 
 def test_sanitizer_audit_and_flagging(monkeypatch, tmp_path):
+    # Use isolated DB per test to avoid flakiness
+    test_db = tmp_path / "gs_sanitizer.db"
+    monkeypatch.setenv("GOLD_STANDARD_TEST_DB", str(test_db))
+
     # Prepare report with canonical value $4300
     rpt = tmp_path / "sanitizer_test.md"
     rpt.write_text("# Sanitizer Test\n")

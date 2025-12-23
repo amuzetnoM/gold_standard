@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 # ══════════════════════════════════════════════════════════════════════════════
 #  Digest Bot - Discord Bot Core
 #  Copyright (c) 2025 SIRIUS Alpha
@@ -31,6 +32,50 @@ try:
 except ImportError:
     DISCORD_AVAILABLE = False
     discord = None
+    # Provide minimal placeholders so modules importing this file do not fail during test collection
+    commands = None
+
+    class _DummyTasks:
+        """Fallback tasks helper providing a compatible `loop` decorator and loop object."""
+
+        class _DummyLoop:
+            def __init__(self, fn):
+                self.fn = fn
+
+            def before_loop(self, coro):
+                def decorator(f):
+                    return f
+
+                return decorator
+
+            def start(self, *args, **kwargs):
+                return None
+
+            def cancel(self, *args, **kwargs):
+                return None
+
+        def loop(self, *args, **kwargs):
+            def decorator(fn):
+                return _DummyTasks._DummyLoop(fn)
+
+            return decorator
+
+        def start(self, *args, **kwargs):
+            return None
+
+    tasks = _DummyTasks()
+
+# Determine a safe base class to inherit from for environments where discord.py is unavailable
+if DISCORD_AVAILABLE and getattr(commands, "Bot", None):
+    BotBase = commands.Bot
+else:
+    class _DummyBot:
+        """Fallback base class used when discord.py is not installed. Allows importing without raising at module import time."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    BotBase = _DummyBot
 
 from ..config import Config, get_config
 from .self_guide import SelfGuide, ServerBlueprint
@@ -72,7 +117,7 @@ My Values:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class DigestDiscordBot(commands.Bot):
+class DigestDiscordBot(BotBase):
     """
     Self-healing, self-guiding Discord bot for market digests.
 

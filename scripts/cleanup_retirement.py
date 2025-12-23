@@ -26,7 +26,9 @@ EXECUTOR_MAX_TASKS = 100
 
 
 def find_stale_tasks(db: DatabaseManager, older_than_seconds: int = STALE_SECONDS):
-    cutoff = (datetime.utcnow() - timedelta(seconds=older_than_seconds)).isoformat()
+    from datetime import timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)).isoformat()
+
     with db._get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -40,7 +42,8 @@ def find_stale_tasks(db: DatabaseManager, older_than_seconds: int = STALE_SECOND
 def retire_or_reset_task(db: DatabaseManager, task_row: dict):
     tid = task_row["id"]
     attempts = task_row.get("attempts") or 0
-    now = datetime.utcnow().isoformat()
+    from datetime import timezone
+    now = datetime.now(timezone.utc).isoformat()
 
     import sqlite3, time
     retry = 3

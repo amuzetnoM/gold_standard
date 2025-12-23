@@ -258,8 +258,9 @@ def generate_premarket(config: Config, logger, model=None, dry_run: bool = False
                 from db_manager import get_db
 
                 db = get_db()
-                task_id = db.add_llm_task(report_path, prompt, provider_hint=None, task_type='generate')
-                logger.info(f"Enqueued LLM task {task_id} for {report_path}")
+                # Enforce Gemini-only for premarket generation tasks
+                task_id = db.add_llm_task(report_path, prompt, provider_hint='gemini_only', task_type='generate')
+                logger.info(f"Enqueued LLM task {task_id} for {report_path} (provider_hint=gemini_only)")
             except Exception as e:
                 logger.warning(f"Failed to enqueue LLM task, falling back to inline generation: {e}")
                 # fallback to inline generation
@@ -272,80 +273,99 @@ def generate_premarket(config: Config, logger, model=None, dry_run: bool = False
                         md[-1] = skeleton
         elif model is not None:
             try:
-                response = model.generate_content(prompt)
-                generated = response.text
+                # Prefer using the provided model (useful for tests and injected providers)
+                try:
+                    response = model.generate_content(prompt)
+                    generated = getattr(response, 'text', None)
+                except Exception:
+                    generated = None
 
-                # Enforce canonical numeric values: replace any incorrect price mentions with canonical data
-                def sanitize_generated(text: str) -> str:
-                    import re
+                # If the provided model did not generate, fall back to strict Gemini attempt
+                if not generated:
+                    from main import GeminiProvider
 
-                    gold_price = data.get("GOLD", {}).get("price")
-                    gold_atr = data.get("GOLD", {}).get("atr") or 0
-                    # Support zone calculations used in prompt
-                    atr_stop_width = float(gold_atr) * 2 if gold_atr else 0
-                    suggested_sl = gold_price - atr_stop_width if gold_price else None
-                    support_zone_low = gold_price - (atr_stop_width * 1.5) if gold_price else None
-                    support_zone_high = gold_price - atr_stop_width if gold_price else None
-
-                    # Replace explicit 'Current Gold Price' mentions
-                    if gold_price is not None:
-                        text = re.sub(r"(Current Gold Price:\s*\$)\s*[0-9\.,]+", f"\1{gold_price}", text, flags=re.IGNORECASE)
-
-                        # Replace nearby mentions where gold is referenced with a $<number> if it is off by >5%
-                        def fix_match(m):
-                            full = m.group(0)
-                            num = float(m.group(2).replace(",", "")) if m.group(2) else None
-                            if num and abs((num - gold_price) / gold_price) > 0.05:
-                                return m.group(1) + str(gold_price)
-                            return full
-
-                        text = re.sub(r"(gold[^\n]{0,40}?\$)([0-9\.,]+)", fix_match, text, flags=re.IGNORECASE)
-
-                    # Replace support/stop placeholders if computed
-                    if support_zone_low is not None and support_zone_high is not None and suggested_sl is not None:
-                        text = re.sub(r"\$X,XXX|\$X,XXX|\$X,XXX", f"${int(support_zone_low)}", text)
-
-                    # Enforce canonical prices for all known assets to prevent accidental mis-attribution
                     try:
-                        def enforce_canonical(text: str) -> str:
-                            # For each asset in the data dict, replace nearby $numbers with the canonical price
-                            for asset_key, v in data.items():
-                                if not isinstance(v, dict):
-                                    continue
-                                asset_price = v.get("price")
-                                if asset_price is None:
-                                    continue
+                        gem = GeminiProvider(config.GEMINI_MODEL)
+                        response = gem.generate_content(prompt)
+                        generated = response.text
+                    except Exception as ge:
+                        logger.error(f"Gemini generation failed for premarket (strict): {ge}")
+                        # Fall back to non-AI skeleton to avoid partial/hallucinated content
+                        md.append(_generate_skeleton_premarket(data, week_info, cortex))
+                        generated = None
 
-                                # Variants to match in natural language (e.g., 'Yields' -> 'YIELD')
-                                variants = {asset_key, asset_key.lower(), asset_key.title(), asset_key.capitalize()}
-                                if asset_key.upper() == "YIELD":
-                                    variants.update({"Yields", "Yield", "YIELD"})
+                if generated:
+                    # Enforce canonical numeric values: replace any incorrect price mentions with canonical data
+                    def sanitize_generated(text: str) -> str:
+                        import re
 
-                                for tok in variants:
-                                    # Match constructs like 'DXY ($98.72)' or 'rising Yields ($98.72)'
-                                    pattern = re.compile(rf"({re.escape(tok)}[^\n]{{0,40}}\$)\s*[0-9\.,]+", flags=re.IGNORECASE)
+                        gold_price = data.get("GOLD", {}).get("price")
+                        gold_atr = data.get("GOLD", {}).get("atr") or 0
+                        # Support zone calculations used in prompt
+                        atr_stop_width = float(gold_atr) * 2 if gold_atr else 0
+                        suggested_sl = gold_price - atr_stop_width if gold_price else None
+                        support_zone_low = gold_price - (atr_stop_width * 1.5) if gold_price else None
+                        support_zone_high = gold_price - atr_stop_width if gold_price else None
 
-                                    def _repl(m):
-                                        return m.group(1) + f"{asset_price}"
+                        # Replace explicit 'Current Gold Price' mentions
+                        if gold_price is not None:
+                            text = re.sub(r"(Current Gold Price:\s*\$)\s*[0-9\.,]+", f"\1{gold_price}", text, flags=re.IGNORECASE)
 
-                                    text = pattern.sub(_repl, text)
+                            # Replace nearby mentions where gold is referenced with a $<number> if it is off by >5%
+                            def fix_match(m):
+                                full = m.group(0)
+                                num = float(m.group(2).replace(",", "")) if m.group(2) else None
+                                if num and abs((num - gold_price) / gold_price) > 0.05:
+                                    return m.group(1) + str(gold_price)
+                                return full
 
-                                # As a fallback, also replace explicit 'Asset: $number' patterns where asset key appears
-                                fallback = re.compile(rf"({re.escape(asset_key)}\s*:\s*\$)\s*[0-9\.,]+", flags=re.IGNORECASE)
+                            text = re.sub(r"(gold[^\n]{0,40}?\$)([0-9\.,]+)", fix_match, text, flags=re.IGNORECASE)
 
-                                text = fallback.sub(lambda m: m.group(1) + f"{asset_price}", text)
+                        # Replace support/stop placeholders if computed
+                        if support_zone_low is not None and support_zone_high is not None and suggested_sl is not None:
+                            text = re.sub(r"\$X,XXX|\$X,XXX|\$X,XXX", f"${int(support_zone_low)}", text)
 
-                            return text
+                        # Enforce canonical prices for all known assets to prevent accidental mis-attribution
+                        try:
+                            def enforce_canonical(text: str) -> str:
+                                # For each asset in the data dict, replace nearby $numbers with the canonical price
+                                for asset_key, v in data.items():
+                                    if not isinstance(v, dict):
+                                        continue
+                                    asset_price = v.get("price")
+                                    if asset_price is None:
+                                        continue
 
-                        text = enforce_canonical(text)
-                    except Exception:
-                        # Non-critical; if enforcement fails, leave text as-is
-                        pass
+                                    # Variants to match in natural language (e.g., 'Yields' -> 'YIELD')
+                                    variants = {asset_key, asset_key.lower(), asset_key.title(), asset_key.capitalize()}
+                                    if asset_key.upper() == "YIELD":
+                                        variants.update({"Yields", "Yield", "YIELD"})
 
-                    return text
+                                    for tok in variants:
+                                        # Match constructs like 'DXY ($98.72)' or 'rising Yields ($98.72)'
+                                        pattern = re.compile(rf"({re.escape(tok)}[^\n]{{0,40}}\$)\s*[0-9\.,]+", flags=re.IGNORECASE)
 
-                sanitized = sanitize_generated(generated)
-                md.append(sanitized)
+                                        def _repl(m):
+                                            return m.group(1) + f"{asset_price}"
+
+                                        text = pattern.sub(_repl, text)
+
+                                    # As a fallback, also replace explicit 'Asset: $number' patterns where asset key appears
+                                    fallback = re.compile(rf"({re.escape(asset_key)}\s*:\s*\$)\s*[0-9\.,]+", flags=re.IGNORECASE)
+
+                                    text = fallback.sub(lambda m: m.group(1) + f"{asset_price}", text)
+
+                                return text
+
+                            text = enforce_canonical(text)
+                        except Exception:
+                            # Non-critical; if enforcement fails, leave text as-is
+                            pass
+
+                        return text
+
+                    sanitized = sanitize_generated(generated)
+                    md.append(sanitized)
             except Exception as e:
                 logger.error(f"AI generation failed: {e}")
                 md.append(_generate_skeleton_premarket(data, week_info, cortex))

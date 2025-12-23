@@ -17,6 +17,7 @@ SQLite-based storage for reports, journals, analysis data, and insights.
 Provides intelligent redundancy control, date-wise organization, and task management.
 """
 
+import os
 import json
 import logging
 import sqlite3
@@ -28,7 +29,12 @@ from typing import Any, Dict, List, Optional
 
 # Database path
 DB_DIR = Path(__file__).resolve().parent / "data"
-DB_PATH = DB_DIR / "gold_standard.db"
+# Allow overriding DB path via environment (useful for tests and alternate deployments)
+_env_db = os.getenv("GOLD_STANDARD_TEST_DB") or os.getenv("GOLD_STANDARD_DB")
+if _env_db:
+    DB_PATH = Path(_env_db)
+else:
+    DB_PATH = DB_DIR / "gold_standard.db"
 
 
 @dataclass
@@ -321,9 +327,9 @@ class DatabaseManager:
             filtered.append(r)
 
         # eligible where last_used is NULL or older than threshold
-        import datetime
+        from datetime import datetime, timezone
 
-        cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=days_threshold)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - datetime.timedelta(days=days_threshold)).isoformat()
         eligible = [r for r in reversed(filtered) if (r.get("last_used") is None or str(r.get("last_used")) < cutoff)]
 
         # Keep at least min_keep models (the most recently used ones) - remove from eligible if needed
@@ -2686,10 +2692,22 @@ _db_manager: Optional[DatabaseManager] = None
 
 
 def get_db() -> DatabaseManager:
-    """Get the singleton database manager instance."""
+    """Get the singleton database manager instance.
+
+    If the environment variable `GOLD_STANDARD_TEST_DB` (or `GOLD_STANDARD_DB`) is set and
+    differs from the currently-opened DB, a new DatabaseManager instance will be created.
+    This allows per-test DB isolation without rebooting the process.
+    """
     global _db_manager
+
+    env_db = os.getenv("GOLD_STANDARD_TEST_DB") or os.getenv("GOLD_STANDARD_DB")
     if _db_manager is None:
-        _db_manager = DatabaseManager()
+        _db_manager = DatabaseManager(db_path=Path(env_db) if env_db else None)
+        return _db_manager
+
+    # If env override present and different from current, recreate the manager
+    if env_db and str(_db_manager.db_path) != str(Path(env_db)):
+        _db_manager = DatabaseManager(db_path=Path(env_db))
     return _db_manager
 
 

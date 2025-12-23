@@ -24,7 +24,7 @@ import signal
 import sqlite3
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
@@ -129,7 +129,8 @@ def poll_once(db: DatabaseManager, llm: LocalLLM, max_tasks: int = DEFAULT_MAX_T
         LOG.info("Processing task %s (attempts=%s)", task_id, attempts)
 
         # Mark started
-        now = datetime.utcnow().isoformat()
+        from datetime import timezone
+        now = datetime.now(timezone.utc).isoformat()
         with db._get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -147,11 +148,12 @@ def poll_once(db: DatabaseManager, llm: LocalLLM, max_tasks: int = DEFAULT_MAX_T
             except Exception:
                 pass
 
+            from datetime import timezone
             with db._get_connection() as conn:
                 cur = conn.cursor()
                 cur.execute(
                     "UPDATE llm_tasks SET status = 'done', response = ?, completed_at = ? WHERE id = ?",
-                    (result, datetime.utcnow().isoformat(), task_id),
+                    (result, datetime.now(timezone.utc).isoformat(), task_id),
                 )
         except Exception as e:
             LOG.exception("Task %s failed on model %s: %s", task_id, getattr(llm, 'model_name', None), e)
@@ -171,7 +173,7 @@ def poll_once(db: DatabaseManager, llm: LocalLLM, max_tasks: int = DEFAULT_MAX_T
                             cur = conn.cursor()
                             cur.execute(
                                 "UPDATE llm_tasks SET status = 'done', response = ?, completed_at = ? WHERE id = ?",
-                                (result, datetime.utcnow().isoformat(), task_id),
+                                (result, datetime.now(timezone.utc).isoformat(), task_id),
                             )
             except Exception:
                 LOG.exception("Retry after model reload failed for task %s", task_id)
@@ -190,9 +192,10 @@ def poll_once(db: DatabaseManager, llm: LocalLLM, max_tasks: int = DEFAULT_MAX_T
             else:
                 with db._get_connection() as conn:
                     cur = conn.cursor()
+                    from datetime import timezone
                     cur.execute(
                         "UPDATE llm_tasks SET status = 'failed', error = ?, completed_at = ? WHERE id = ?",
-                        (str(e), datetime.utcnow().isoformat(), task_id),
+                        (str(e), datetime.now(timezone.utc).isoformat(), task_id),
                     )
     return len(rows)
 

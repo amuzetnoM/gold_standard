@@ -89,7 +89,7 @@ class LLMConfig:
     """LLM provider configuration."""
 
     # Provider selection: "local" (llama.cpp) or "ollama"
-    provider: Literal["local", "ollama", "gemini"] = field(default_factory=lambda: _env("LLM_PROVIDER", "gemini"))
+    provider: Literal["local", "ollama", "gemini"] = field(default_factory=lambda: _env("LLM_PROVIDER", "local"))
 
     # llama.cpp settings
     local_model_path: Path = field(

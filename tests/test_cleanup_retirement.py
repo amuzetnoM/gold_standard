@@ -23,7 +23,8 @@ def test_find_and_reset_stale_task(tmp_path, monkeypatch):
     db = DatabaseManager(db_path=db_path)
 
     # Insert a stale task
-    started_at = (datetime.utcnow() - timedelta(hours=2)).isoformat()
+    from datetime import timezone
+    started_at = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     with db._get_connection() as conn:
         cur = conn.cursor()
         cur.execute(

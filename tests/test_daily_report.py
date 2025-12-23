@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 
@@ -18,13 +18,13 @@ def make_db_with_data(tmp_path: Path) -> DatabaseManager:
         cur = conn.cursor()
         # Completed task
         cur.execute("INSERT INTO llm_tasks (document_path, prompt, status, completed_at) VALUES (?, ?, 'completed', ?)",
-                    ("output/reports/premarket/premarket_2025-01-01.md", "prompt1", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+                    ("output/reports/premarket/premarket_2025-01-01.md", "prompt1", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")))
         # Flagged task
         cur.execute("INSERT INTO llm_tasks (document_path, prompt, status, completed_at) VALUES (?, ?, 'flagged', ?)",
-                    ("output/reports/premarket/premarket_2025-01-01_flagged.md", "prompt2", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+                    ("output/reports/premarket/premarket_2025-01-01_flagged.md", "prompt2", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")))
         # Sanitizer audit
         cur.execute("INSERT INTO llm_sanitizer_audit (task_id, corrections, notes, created_at) VALUES (?, ?, ?, ?)",
-                    (1, 2, "corrected numeric values", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+                    (1, 2, "corrected numeric values", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")))
     return db
 
 

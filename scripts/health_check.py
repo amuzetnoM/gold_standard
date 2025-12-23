@@ -27,8 +27,10 @@ REQUIRED_PKGS = [
 
 def check_python_version():
     v = sys.version_info
-    ok = (v.major == 3 and v.minor == 12)
-    print(f"Python: {sys.version.splitlines()[0]} -> {'OK' if ok else 'WARN (expected 3.12)'}")
+    # Accept 3.12 or newer 3.x patch (3.13 etc.) to allow CI and local dev variants
+    ok = (v.major == 3 and v.minor >= 12)
+    status = 'OK' if ok else 'WARN (expected 3.12+)'
+    print(f"Python: {sys.version.splitlines()[0]} -> {status}")
     return ok
 
 

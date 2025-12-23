@@ -100,6 +100,14 @@ except Exception:
 genai = None
 mpf = None
 import yfinance as yf
+
+# Compatibility: ensure yf.download exists for test monkeypatches and legacy callers
+if yf is not None and not hasattr(yf, "download"):
+    def _yf_download(ticker, *args, **kwargs):
+        t = yf.Ticker(ticker)
+        return t.history(*args, **kwargs)
+
+    yf.download = _yf_download
 from colorama import init
 
 # ==========================================
@@ -1995,17 +2003,21 @@ class Strategist:
         prompt = self._build_prompt(gsr, vix_price, data_dump)
 
         try:
-            if not self.model:
-                raise RuntimeError("AI model not available")
-            response = self.model.generate_content(prompt)
-            response_text = response.text
+            # Enforce Gemini-only for journal generation (strict policy)
+            try:
+                gem = GeminiProvider(self.config.GEMINI_MODEL)
+                response = gem.generate_content(prompt)
+                response_text = response.text
+            except Exception as ge:
+                self.logger.error(f"Gemini generation failed for Journal (strict): {ge}", exc_info=True)
+                return f"Error generating journal with Gemini: {ge}", "NEUTRAL"
 
             bias = self._extract_bias(response_text)
             self.logger.info(f"AI analysis complete. Bias: {bias}")
             return response_text, bias
 
         except Exception as e:
-            self.logger.error(f"AI generation error: {e}", exc_info=True)
+            self.logger.error(f"Unexpected AI generation error: {e}", exc_info=True)
             return f"Error generating analysis: {e}", "NEUTRAL"
 
     def _format_data_summary(self) -> str:

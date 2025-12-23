@@ -33,7 +33,9 @@ def _extract_premarket_summary() -> tuple[str, str, str]:
     """
     import sqlite3
 
-    reports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "output", "reports")
+    # Allow tests to override the project base dir via GOLD_STANDARD__BASE
+    base_dir = os.getenv("GOLD_STANDARD__BASE") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    reports_dir = os.path.join(base_dir, "output", "reports")
 
     # Find the newest premarket file
     candidates = glob.glob(os.path.join(reports_dir, "premarket_*.md"))
@@ -90,7 +92,10 @@ def build_report(db: DatabaseManager, hours: int = DEFAULT_HOURS) -> str:
 
     Returns a short markdown-friendly string suitable for Discord message body.
     """
-    now = datetime.utcnow()
+    # Use timezone-aware UTC now to avoid deprecation warnings
+    from datetime import timezone
+
+    now = datetime.now(timezone.utc)
     since = now - timedelta(hours=hours)
     since_sql = since.strftime("%Y-%m-%d %H:%M:%S")
 

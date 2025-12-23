@@ -264,6 +264,11 @@ class DigestWriter:
         output_path = self.get_digest_path(target)
         backup_path = None
 
+        # Allow fallback writes to overwrite existing digest files by default
+        is_fallback = bool(getattr(result, 'metadata', {}) and getattr(result, 'metadata', {}).get('fallback', False))
+        if is_fallback:
+            overwrite = True
+
         # Check existing
         if output_path.exists():
             if not overwrite:
@@ -276,14 +281,15 @@ class DigestWriter:
             if backup:
                 backup_path = self._create_backup(output_path)
 
-        # Validate result
-        if not result.success:
+        # Defensive validation of result object (avoid AttributeError on malformed objects)
+        if not getattr(result, "success", False):
             return WriteResult(
                 success=False,
-                error=f"Cannot write failed result: {result.error}",
+                error=f"Cannot write failed result: {getattr(result, 'error', 'Result indicates failure')}",
             )
 
-        if not result.content or len(result.content) < 50:
+        content_val = getattr(result, "content", None)
+        if not content_val or len(content_val) < 50:
             return WriteResult(
                 success=False,
                 error="Digest content too short or empty",
