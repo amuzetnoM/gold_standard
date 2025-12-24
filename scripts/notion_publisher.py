@@ -1048,6 +1048,46 @@ class NotionPublisher:
                         "reason": "opted_out_publish",
                     }
 
+                # If DB available, consult document lifecycle to prevent publishing drafts
+                if DB_AVAILABLE:
+                    try:
+                        db = get_db()
+                        doc_life = db.get_document_status(str(path)) if 'path' in locals() else None
+                        if doc_life and doc_life.get('status') == 'draft' and not force:
+                            return {
+                                "page_id": "",
+                                "url": "",
+                                "type": doc_type or "notes",
+                                "tags": [],
+                                "skipped": True,
+                                "reason": "lifecycle_draft",
+                            }
+                        # Prevent publishing if sanitizer corrections exist for associated tasks
+                        try:
+                            # Find tasks linked to this document path
+                            with db._get_connection() as conn:
+                                cur = conn.cursor()
+                                cur.execute("SELECT id FROM llm_tasks WHERE document_path = ?", (str(path),))
+                                task_ids = [r[0] for r in cur.fetchall()]
+                                if task_ids:
+                                    q = f"SELECT SUM(corrections) as total FROM llm_sanitizer_audit WHERE task_id IN ({','.join(['?']*len(task_ids))})"
+                                    cur.execute(q, tuple(task_ids))
+                                    row = cur.fetchone()
+                                    corrections = int(row[0] or 0) if row else 0
+                                    if corrections > 0 and not force:
+                                        return {
+                                            "page_id": "",
+                                            "url": "",
+                                            "type": doc_type or "notes",
+                                            "tags": [],
+                                            "skipped": True,
+                                            "reason": "sanitizer_corrections",
+                                        }
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
                 if not is_ready_for_sync(content):
                     reason = f"Document status is '{status}'"
                     if status == "draft":
