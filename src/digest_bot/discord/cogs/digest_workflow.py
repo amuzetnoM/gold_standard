@@ -158,6 +158,50 @@ class DigestWorkflowCog(commands.Cog):
             # Fallback to plaintext
             await ctx.send(discord_templates.plain_daily_text(structured), view=view)
 
+    @commands.command(name="preview_digest")
+    @commands.has_role("operators")
+    async def cmd_preview_digest(self, ctx, period: int = 24, send: bool = False):
+        """Preview the digest in-channel or print to console; operators only.
+
+        Usage: `!preview_digest 24` (shows embed locally)
+        """
+        from db_manager import DatabaseManager
+        db = DatabaseManager()
+        structured = build_structured_report(db, hours=period)
+        embed_dict = discord_templates.build_daily_embed(structured)
+
+        try:
+            embed_obj = discord.Embed.from_dict(embed_dict) if hasattr(discord, 'Embed') else None
+        except Exception:
+            embed_obj = None
+
+        if send:
+            # Send to channel but respect dedupe
+            try:
+                import hashlib, json
+                payload_key = json.dumps(embed_dict, sort_keys=True, default=str)
+                fingerprint = hashlib.sha256(payload_key.encode('utf-8')).hexdigest()
+            except Exception:
+                fingerprint = None
+            db = DatabaseManager()
+            channel_key = str(ctx.channel.id) if ctx and hasattr(ctx.channel, 'id') else 'channel'
+            if fingerprint and db.was_discord_recent(channel_key, fingerprint, minutes=5):
+                await ctx.send("Skipping send: recent duplicate fingerprint", ephemeral=True)
+                return
+            if embed_obj is not None:
+                await ctx.send(embed=embed_obj)
+            else:
+                await ctx.send(discord_templates.plain_daily_text(structured))
+            if fingerprint:
+                db.record_discord_send(channel_key, fingerprint, hashlib.sha256(payload_key.encode('utf-8')).hexdigest())
+            return
+
+        # Local preview in channel
+        if embed_obj is not None:
+            await ctx.send(embed=embed_obj)
+        else:
+            await ctx.send(discord_templates.plain_daily_text(structured))
+
 
 def setup(bot):
     return DigestWorkflowCog(bot)

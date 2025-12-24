@@ -259,7 +259,26 @@ def send(hours: int = DEFAULT_HOURS, webhook: Optional[str] = None, dry_run: boo
 
     # Determine webhook URL: prefer explicit `webhook` arg, otherwise environment
     webhook_url = webhook or os.getenv("DISCORD_REPORTS_WEBHOOK_URL") or os.getenv("DISCORD_WEBHOOK_URL")
+
+    # Compute a fingerprint for this payload to avoid duplicate sends
+    try:
+        import hashlib, json
+        payload_key = json.dumps(embed, sort_keys=True, default=str)
+        fingerprint = hashlib.sha256(payload_key.encode('utf-8')).hexdigest()
+    except Exception:
+        fingerprint = None
+
+    db = DatabaseManager()
+    if fingerprint and db.was_discord_recent(webhook_url or "default", fingerprint, minutes=30):
+        LOG.info("Skipping duplicate daily report send (recent fingerprint match)")
+        return True
+
     ok = send_discord(None, webhook_url=webhook_url, embed=embed)
+    if ok and fingerprint:
+        try:
+            db.record_discord_send(webhook_url or "default", fingerprint, hashlib.sha256(payload_key.encode('utf-8')).hexdigest())
+        except Exception:
+            pass
     if not ok:
         LOG.warning("Failed to send daily report embed to Discord; falling back to plaintext")
         # Attempt plain-text fallback using existing webhook env

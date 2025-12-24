@@ -176,6 +176,17 @@ class DatabaseManager:
                 )
             """)
 
+            # Discord message history for dedupe/rate-limit
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discord_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel TEXT,
+                    fingerprint TEXT,
+                    payload_hash TEXT,
+                    sent_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+
             # Subscriptions table - user subscriptions to topics for alerts
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -243,6 +254,30 @@ class DatabaseManager:
                 (user, action, details),
             )
             return cursor.lastrowid
+
+    # ------------------------------------------------------------------
+    # Discord message dedupe helpers
+    # ------------------------------------------------------------------
+    def record_discord_send(self, channel: str, fingerprint: str, payload_hash: str) -> int:
+        """Record a discord message send for dedupe and auditing."""
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO discord_messages (channel, fingerprint, payload_hash, sent_at) VALUES (?, ?, ?, datetime('now'))",
+                (channel, fingerprint, payload_hash),
+            )
+            return cur.lastrowid
+
+    def was_discord_recent(self, channel: str, fingerprint: str, minutes: int = 30) -> bool:
+        """Return True if same fingerprint was sent to `channel` within `minutes` minutes."""
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(1) as cnt FROM discord_messages WHERE channel = ? AND fingerprint = ? AND sent_at >= datetime('now', ?)",
+                (channel, fingerprint, f"-{minutes} minutes"),
+            )
+            row = cur.fetchone()
+            return int(row["cnt"] or 0) > 0
 
     # ------------------------------------------------------------------
     # Subscription helpers
