@@ -84,6 +84,17 @@ NOTION_TYPES = [
     "analysis",
 ]
 
+# Files and filename substrings to always ignore from Notion sync (case-insensitive)
+IGNORE_PATTERNS = [
+    "monitor_",
+    "data_fetch_",
+    "digest_",
+    "digests/",
+    "_act-",
+    "act-",
+    "FILE_INDEX",
+]
+
 # File pattern to Notion type mapping - ORDER MATTERS (first match wins)
 TYPE_PATTERNS = [
     # Journals (daily)
@@ -945,6 +956,22 @@ class NotionPublisher:
         content = path.read_text(encoding="utf-8")
         filename = path.name
 
+        # Enforce repository-level ignore patterns: never publish these files to Notion
+        try:
+            fname_lower = filename.lower()
+            for pat in IGNORE_PATTERNS:
+                if pat.lower() in fname_lower or pat.lower() in str(path).lower():
+                    return {
+                        "page_id": "",
+                        "url": "",
+                        "type": doc_type or "notes",
+                        "tags": [],
+                        "skipped": True,
+                        "reason": "excluded_pattern",
+                    }
+        except Exception:
+            pass
+
         # Normalize path and compute a stronger content fingerprint for DB checks
         normalized_path = str(path)
         file_hash = None
@@ -1287,6 +1314,21 @@ def sync_all_outputs(output_dir: str = None, force: bool = False, dry_run: bool 
 
     # Filter out index files and archive
     md_files = [f for f in md_files if "FILE_INDEX" not in f.name and "/archive/" not in str(f).replace("\\", "/")]
+
+    # Apply repository-level ignore patterns so certain internal files (digests, executor outputs)
+    # never get published even when --force is used.
+    def _is_ignored(fpath: Path) -> bool:
+        try:
+            name = fpath.name.lower()
+            s = str(fpath).lower()
+            for p in IGNORE_PATTERNS:
+                if p.lower() in name or p.lower() in s:
+                    return True
+        except Exception:
+            return False
+        return False
+
+    md_files = [f for f in md_files if not _is_ignored(f)]
 
     for filepath in md_files:
         try:

@@ -974,6 +974,18 @@ def _run_post_analysis_tasks(force_inline: bool = False, wait_for_completion: bo
 
                                 # Check type-aware schedule
                                 doc_type = "journal" if "Journal_" in filepath.name else "reports"
+                                # Ensure executor-only files and digests are never published (extra safety)
+                                fname_l = filepath.name.lower()
+                                if any(p.lower() in fname_l or p.lower() in str(filepath).lower() for p in [
+                                    "monitor_",
+                                    "data_fetch_",
+                                    "digest_",
+                                    "digests/",
+                                    "_act-",
+                                    "act-",
+                                ]):
+                                    skipped_schedule += 1
+                                    continue
                                 if not should_sync_doc(filepath, doc_type):
                                     skipped_schedule += 1
                                     continue
