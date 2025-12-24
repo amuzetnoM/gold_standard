@@ -215,14 +215,14 @@ class NotionConfig:
 class NotionPublisher:
     """Publish Gold Standard reports to Notion."""
 
-    def __init__(self, config: NotionConfig = None):
-        # Allow tests to inject a fake Client into this module via monkeypatching.
-        if not NOTION_AVAILABLE and Client is None:
+    def __init__(self, config: NotionConfig = None, no_client_ok: bool = False):
+        # Allow tests or dry-run to construct without the Notion client.
+        if not no_client_ok and not NOTION_AVAILABLE and Client is None:
             raise ImportError("notion-client package not installed")
 
         self.config = config or NotionConfig.from_env()
-        # Initialize the notion client (may be a real client or a monkeypatched fake)
-        self.client = Client(auth=self.config.api_key) if Client is not None else None
+        # Initialize the notion client (may be a real client, a monkeypatched fake, or None for dry-run)
+        self.client = Client(auth=self.config.api_key) if (Client is not None and not no_client_ok) else None
 
     def _get_database_properties(self) -> Dict[str, Any]:
         """Return data-source properties if available, otherwise fall back to database properties.
@@ -1110,7 +1110,7 @@ class NotionPublisher:
                     return s
 
             title = _sanitize_title(title)
-                result = self.publish(title=title, content=content, doc_type=doc_type, tags=tags, filename=filename, dry_run=dry_run)
+            result = self.publish(title=title, content=content, doc_type=doc_type, tags=tags, filename=filename, dry_run=dry_run)
 
             # Record the sync in the database, using the strong fingerprint when available
             if DB_AVAILABLE:
@@ -1218,7 +1218,7 @@ def sync_all_outputs(output_dir: str = None, force: bool = False, dry_run: bool 
             print("[NOTION] Sync already completed for today, skipping")
             return {"success": [], "skipped": [], "failed": [], "reason": "Already synced today"}
 
-    publisher = NotionPublisher()
+    publisher = NotionPublisher(no_client_ok=dry_run)
     results = {"success": [], "skipped": [], "failed": []}
 
     # Find all markdown files recursively
@@ -1304,7 +1304,7 @@ if __name__ == "__main__":
                 print(f"  [{doc['type']}] {doc['title']} ({doc['date']})")
 
         elif args.file:
-            publisher = NotionPublisher()
+            publisher = NotionPublisher(no_client_ok=args.dry_run)
             result = publisher.sync_file(args.file, force=args.force, dry_run=args.dry_run)
             if result.get("skipped"):
                 print(f"⏭ Skipped: {result.get('reason')}")
