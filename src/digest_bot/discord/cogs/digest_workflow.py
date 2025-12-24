@@ -133,15 +133,30 @@ class DigestWorkflowCog(commands.Cog):
     @commands.has_role("operators")
     async def cmd_digest_full(self, ctx, period: int = 24):
         """Generate a full digest and post to channel with approval UI (operators only)."""
-        from ..daily_report import build_report
+        from ..daily_report import build_structured_report
+        from ..discord import templates as discord_templates
         from db_manager import DatabaseManager
         db = DatabaseManager()
-        # Build short report and post
-        msg = build_report(db, hours=period)
+        # Build structured report and render embed
+        structured = build_structured_report(db, hours=period)
+        embed_dict = discord_templates.build_daily_embed(structured)
+
+        # Convert to discord.Embed if library is available
+        embed_obj = None
+        try:
+            if hasattr(discord, 'Embed'):
+                embed_obj = discord.Embed.from_dict(embed_dict)
+        except Exception:
+            embed_obj = None
+
         # Create a synthetic task id for UI actions if not tied to an existing task
         task_id = 0
         view = ApproveView(task_id, ctx.author.id)
-        await ctx.send(msg, view=view)
+        if embed_obj is not None:
+            await ctx.send(embed=embed_obj, view=view)
+        else:
+            # Fallback to plaintext
+            await ctx.send(discord_templates.plain_daily_text(structured), view=view)
 
 
 def setup(bot):

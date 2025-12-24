@@ -17,6 +17,7 @@ from typing import Optional
 from . import __version__ as DIGEST_BOT_VERSION
 from db_manager import DatabaseManager
 from scripts.notifier import send_discord
+from .discord import templates as discord_templates
 
 LOG = logging.getLogger("digest_bot.daily_report")
 
@@ -249,39 +250,11 @@ def build_structured_report(db: DatabaseManager, hours: int = DEFAULT_HOURS) -> 
 def send(hours: int = DEFAULT_HOURS, webhook: Optional[str] = None, dry_run: bool = False) -> bool:
     db = DatabaseManager()
     structured = build_structured_report(db, hours=hours)
-    # Create a compact embed
-    embed = {
-        "title": f"Gold Standard — LLM Daily Report ({hours}h)",
-        "description": f"Queue: **{structured['queue_length']}** · Completed: **{structured['completed']}** · Corrections: **{structured['corrections']}**",
-        "color": 0x2E86AB,
-        "fields": [],
-        "footer": {"text": f"Digest Bot v{DIGEST_BOT_VERSION}"},
-    }
-
-    # Add premarket if present
-    pm = structured.get("premarket", {})
-    if pm.get("bias"):
-        text = f"**{pm.get('bias')}** — {pm.get('rationale') or ''}"
-        if pm.get("notion_url"):
-            text += f"\nNotion: {pm.get('notion_url')}"
-        embed["fields"].append({"name": "Pre-Market", "value": text, "inline": False})
-
-    # Short lists
-    if structured.get("recent_audits"):
-        sample = "\n".join([f"id={a['id']} t={a['task_id']} c={a['corrections']}" for a in structured['recent_audits']])
-        embed["fields"].append({"name": "Recent sanitizer audits", "value": sample, "inline": False})
-
-    if structured.get("flagged"):
-        sample = "\n".join([f"id={t['id']} {Path(t['document_path']).name}" for t in structured['flagged']])
-        embed["fields"].append({"name": "Flagged tasks", "value": sample, "inline": False})
-
-    if structured.get("errors"):
-        sample = "\n".join([f"id={e['id']} {Path(e['document_path']).name}" for e in structured['errors']])
-        embed["fields"].append({"name": "Recent errors", "value": sample, "inline": False})
+    embed = discord_templates.build_daily_embed(structured)
 
     if dry_run:
         # Print a simple markdown representation and return
-        print(build_report(db, hours=hours))
+        print(discord_templates.plain_daily_text(structured))
         return True
 
     # Determine webhook URL: prefer explicit `webhook` arg, otherwise environment
