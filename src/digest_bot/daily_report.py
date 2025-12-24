@@ -9,6 +9,7 @@ explicit webhook passed via --webhook.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import Path
 import logging
 import argparse
 from typing import Optional
@@ -184,19 +185,117 @@ def build_report(db: DatabaseManager, hours: int = DEFAULT_HOURS) -> str:
     return "\n".join(lines)
 
 
+def build_structured_report(db: DatabaseManager, hours: int = DEFAULT_HOURS) -> dict:
+    """Build a structured report suitable for embedding in Discord.
+
+    Returns a dict containing top-level metrics and short lists for details.
+    """
+    from datetime import timezone
+
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+    since_sql = since.strftime("%Y-%m-%d %H:%M:%S")
+
+    queue_length = db.get_llm_queue_length()
+
+    bias, rationale, notion_url = _extract_premarket_summary()
+
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT SUM(corrections) as total FROM llm_sanitizer_audit WHERE created_at >= ?",
+            (since_sql,),
+        )
+        corrections_total = int(cursor.fetchone()["total"] or 0)
+
+        cursor.execute(
+            "SELECT COUNT(1) as cnt FROM llm_tasks WHERE status = 'completed' AND completed_at >= ?",
+            (since_sql,),
+        )
+        completed_cnt = int(cursor.fetchone()["cnt"] or 0)
+
+        # Small samples for details
+        cursor.execute(
+            "SELECT id, task_id, corrections, notes, created_at FROM llm_sanitizer_audit WHERE created_at >= ? ORDER BY created_at DESC LIMIT 8",
+            (since_sql,),
+        )
+        recent_audits = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT id, document_path, status, started_at, completed_at FROM llm_tasks WHERE status = 'flagged' AND completed_at >= ? ORDER BY completed_at DESC LIMIT 8",
+            (since_sql,),
+        )
+        flagged_tasks = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT id, document_path, error, attempts, completed_at FROM llm_tasks WHERE error IS NOT NULL AND completed_at >= ? ORDER BY completed_at DESC LIMIT 8",
+            (since_sql,),
+        )
+        errors = [dict(r) for r in cursor.fetchall()]
+
+    return {
+        "generated_at": now.isoformat(),
+        "hours": hours,
+        "queue_length": queue_length,
+        "completed": completed_cnt,
+        "corrections": corrections_total,
+        "premarket": {"bias": bias, "rationale": rationale, "notion_url": notion_url},
+        "recent_audits": recent_audits,
+        "flagged": flagged_tasks,
+        "errors": errors,
+    }
+
+
 def send(hours: int = DEFAULT_HOURS, webhook: Optional[str] = None, dry_run: bool = False) -> bool:
     db = DatabaseManager()
-    msg = build_report(db, hours=hours)
+    structured = build_structured_report(db, hours=hours)
+    # Create a compact embed
+    embed = {
+        "title": f"Gold Standard — LLM Daily Report ({hours}h)",
+        "description": f"Queue: **{structured['queue_length']}** · Completed: **{structured['completed']}** · Corrections: **{structured['corrections']}**",
+        "color": 0x2E86AB,
+        "fields": [],
+        "footer": {"text": f"Digest Bot v{DIGEST_BOT_VERSION}"},
+    }
+
+    # Add premarket if present
+    pm = structured.get("premarket", {})
+    if pm.get("bias"):
+        text = f"**{pm.get('bias')}** — {pm.get('rationale') or ''}"
+        if pm.get("notion_url"):
+            text += f"\nNotion: {pm.get('notion_url')}"
+        embed["fields"].append({"name": "Pre-Market", "value": text, "inline": False})
+
+    # Short lists
+    if structured.get("recent_audits"):
+        sample = "\n".join([f"id={a['id']} t={a['task_id']} c={a['corrections']}" for a in structured['recent_audits']])
+        embed["fields"].append({"name": "Recent sanitizer audits", "value": sample, "inline": False})
+
+    if structured.get("flagged"):
+        sample = "\n".join([f"id={t['id']} {Path(t['document_path']).name}" for t in structured['flagged']])
+        embed["fields"].append({"name": "Flagged tasks", "value": sample, "inline": False})
+
+    if structured.get("errors"):
+        sample = "\n".join([f"id={e['id']} {Path(e['document_path']).name}" for e in structured['errors']])
+        embed["fields"].append({"name": "Recent errors", "value": sample, "inline": False})
+
     if dry_run:
-        print(msg)
+        # Print a simple markdown representation and return
+        print(build_report(db, hours=hours))
         return True
 
-    # Attempt to send via Discord webhook
-    ok = send_discord(msg, webhook_url=webhook)
+    # Determine webhook URL: prefer explicit `webhook` arg, otherwise environment
+    webhook_url = webhook or os.getenv("DISCORD_REPORTS_WEBHOOK_URL") or os.getenv("DISCORD_WEBHOOK_URL")
+    ok = send_discord(None, webhook_url=webhook_url, embed=embed)
     if not ok:
-        LOG.warning("Failed to send daily report to Discord; falling back to stdout")
-        print(msg)
-    return ok
+        LOG.warning("Failed to send daily report embed to Discord; falling back to plaintext")
+        # Attempt plain-text fallback using existing webhook env
+        plain = build_report(db, hours=hours)
+        fallback_ok = send_discord(plain, webhook_url=os.getenv("DISCORD_WEBHOOK_URL"))
+        if not fallback_ok:
+            print(plain)
+        return fallback_ok
+    return True
 
 
 def main(argv: Optional[list] = None):
