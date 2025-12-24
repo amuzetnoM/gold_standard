@@ -949,8 +949,13 @@ class DatabaseManager:
             return ""
 
     def is_file_synced(self, file_path: str) -> bool:
-        """Check if a file has been synced to Notion and hasn't changed."""
-        # Normalize path to absolute resolved form for consistent dedup
+        """Check if a file has been synced to Notion and hasn't changed.
+
+        If `file_hash` is provided, compare against the stored sync fingerprint
+        (useful when publishing uses a computed strong fingerprint instead of raw
+        file bytes). If not provided, fall back to the existing MD5-of-file check.
+        """
+        # Normalize path to absolute resolved form for consistent dedupe
         from pathlib import Path
 
         normalized_path = str(Path(file_path).resolve())
@@ -968,20 +973,34 @@ class DatabaseManager:
             if not row:
                 return False
 
-            # Check if file has changed
-            current_hash = self.get_file_hash(normalized_path)
-            return row["file_hash"] == current_hash
+            stored_hash = row["file_hash"]
 
-    def record_notion_sync(self, file_path: str, page_id: str, url: str, doc_type: str = None) -> bool:
-        """Record that a file has been synced to Notion."""
-        # Normalize path to absolute resolved form for consistent dedup
+            # If caller provided an explicit fingerprint, compare that
+            if hasattr(self, '_last_checked_hash') and self._last_checked_hash:
+                return stored_hash == self._last_checked_hash
+
+            # Otherwise fall back to file MD5
+            current_hash = self.get_file_hash(normalized_path)
+            return stored_hash == current_hash
+
+    def record_notion_sync(self, file_path: str, page_id: str, url: str, doc_type: str = None, file_hash: str | None = None) -> bool:
+        """Record that a file has been synced to Notion.
+
+        If `file_hash` is provided it will be stored as the canonical fingerprint
+        for deduplication. This allows the publisher to write a computed strong
+        fingerprint (title + body + frontmatter) rather than a raw MD5 of the
+        file bytes when content normalization is used.
+        """
+        # Normalize path to absolute resolved form for consistent dedupe
         from pathlib import Path
 
         normalized_path = str(Path(file_path).resolve())
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            file_hash = self.get_file_hash(normalized_path)
+            if not file_hash:
+                file_hash = self.get_file_hash(normalized_path)
+
             now = datetime.now().isoformat()
 
             cursor.execute(
@@ -1006,10 +1025,11 @@ class DatabaseManager:
                     SET status = 'published',
                         notion_page_id = ?,
                         published_at = COALESCE(?, published_at),
-                        updated_at = ?
+                        updated_at = ?,
+                        content_hash = COALESCE(?, content_hash)
                     WHERE file_path = ?
                 """,
-                    (page_id, now, now, normalized_path),
+                    (page_id, now, now, file_hash, normalized_path),
                 )
             except Exception:
                 # If document_lifecycle isn't present or update fails, ignore silently

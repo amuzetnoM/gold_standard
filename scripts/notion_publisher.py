@@ -852,9 +852,31 @@ class NotionPublisher:
         content = path.read_text(encoding="utf-8")
         filename = path.name
 
-        # Normalize path and compute file hash for DB checks
+        # Normalize path and compute a stronger content fingerprint for DB checks
         normalized_path = str(path)
         file_hash = None
+        # Parse frontmatter to include structured metadata in fingerprint
+        try:
+            meta, body = self.parse_frontmatter(content)
+        except Exception:
+            meta, body = {}, content
+
+        # Compute a deterministic strong fingerprint (title + frontmatter + normalized body)
+        try:
+            title_for_hash = None
+            h1_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+            title_for_hash = h1_match.group(1).strip() if h1_match else filename.replace(".md", "").replace("_", " ")
+            # Unescape and strip tags for fingerprinting
+            title_for_hash = html.unescape(title_for_hash)
+            title_for_hash = re.sub(r"<[^>]+>", "", title_for_hash)
+            body_norm = re.sub(r"\s+", " ", html.unescape(body)).strip()
+            meta_str = "" if not meta else ",".join(f"{k}={meta[k]}" for k in sorted(meta.keys()))
+            fingerprint_source = "\n".join([title_for_hash, meta_str, body_norm])
+            file_hash = hashlib.sha256(fingerprint_source.encode("utf-8")).hexdigest()
+            # store hash for potential db comparison later
+            self._last_checked_hash = file_hash
+        except Exception:
+            file_hash = None
         if DB_AVAILABLE:
             try:
                 db = get_db()
@@ -904,6 +926,7 @@ class NotionPublisher:
 
                 # Attempt to claim the document by registering/upserting as in_progress
                 try:
+                    # Register the document lifecycle using the computed fingerprint
                     db.register_document(normalized_path, doc_type or "notes", status="in_progress", content_hash=file_hash)
                 except Exception:
                     pass
@@ -998,10 +1021,14 @@ class NotionPublisher:
             title = _sanitize_title(title)
             result = self.publish(title=title, content=content, doc_type=doc_type, tags=tags, filename=filename)
 
-            # Record the sync in the database
+            # Record the sync in the database, using the strong fingerprint when available
             if DB_AVAILABLE:
                 db = get_db()
-                db.record_notion_sync(str(path), result["page_id"], result["url"], result.get("type", "notes"))
+                try:
+                    db.record_notion_sync(str(path), result["page_id"], result["url"], result.get("type", "notes"), file_hash=file_hash)
+                except TypeError:
+                    # Older DB manager without optional param - fall back
+                    db.record_notion_sync(str(path), result["page_id"], result["url"], result.get("type", "notes"))
         finally:
             try:
                 lock.release()
