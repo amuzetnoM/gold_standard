@@ -187,6 +187,19 @@ class DatabaseManager:
                 )
             """)
 
+            # social posts table for external platforms (audit and dedupe)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS social_posts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform TEXT,
+                    fingerprint TEXT,
+                    payload_hash TEXT,
+                    external_id TEXT,
+                    status TEXT DEFAULT 'sent',
+                    sent_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+
             # Subscriptions table - user subscriptions to topics for alerts
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS subscriptions (

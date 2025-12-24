@@ -263,7 +263,8 @@ class NotionPublisher:
                         "Notion-Version": "2025-09-03",
                         "Content-Type": "application/json",
                     }
-                    r = requests.get(url, headers=headers, timeout=10)
+                    timeout = int(os.getenv("NOTION_API_TIMEOUT", "30"))
+                    r = requests.get(url, headers=headers, timeout=timeout)
                     r.raise_for_status()
                     payload = r.json() or {}
                     data_sources = payload.get("data_sources") or []
@@ -285,7 +286,8 @@ class NotionPublisher:
                         "Notion-Version": "2025-09-03",
                         "Content-Type": "application/json",
                     }
-                    r = requests.get(url, headers=headers, timeout=10)
+                    timeout = int(os.getenv("NOTION_API_TIMEOUT", "30"))
+                    r = requests.get(url, headers=headers, timeout=timeout)
                     r.raise_for_status()
                     payload = r.json() or {}
                     props = payload.get("properties", {}) or {}
@@ -297,7 +299,23 @@ class NotionPublisher:
 
             # Fallback: retrieve database properties via the notion client
             try:
-                db = self.client.databases.retrieve(self.config.database_id)
+                # Respect custom timeout for client-side operations when available
+                try:
+                    db = self.client.databases.retrieve(self.config.database_id)
+                except Exception:
+                    # Last resort: try a simple requests call with a larger timeout
+                    timeout = int(os.getenv("NOTION_API_TIMEOUT", "30"))
+                    import requests as _req
+
+                    url = f"https://api.notion.com/v1/databases/{self.config.database_id}"
+                    headers = {
+                        "Authorization": f"Bearer {self.config.api_key}",
+                        "Notion-Version": "2025-09-03",
+                        "Content-Type": "application/json",
+                    }
+                    r = _req.get(url, headers=headers, timeout=timeout)
+                    r.raise_for_status()
+                    db = r.json() or {}
                 props = db.get("properties", {}) or {}
                 return props
             except Exception as e:
@@ -851,17 +869,18 @@ class NotionPublisher:
                 return {"dry_run": True, "valid": True, "blocks": len(blocks)}
 
         # Create page with robust retry logic, exponential backoff, jitter and structured logging
-        attempts = 5
-        base_delay = 1
+        attempts = int(os.getenv("NOTION_PUBLISH_ATTEMPTS", "7"))
+        base_delay = float(os.getenv("NOTION_PUBLISH_BASE_DELAY", "2"))
         last_exc = None
         for attempt in range(1, attempts + 1):
             try:
                 logging.info("Notion publish attempt %d/%d", attempt, attempts)
-                response = self.client.pages.create(
-                    parent=parent,
-                    properties=properties,
-                    children=blocks[:100],  # Notion limit per request
-                )
+                # Try to prefer a client-level timeout if available; otherwise rely on retries/backoff
+                try:
+                    response = self.client.pages.create(parent=parent, properties=properties, children=blocks[:100])
+                except TypeError:
+                    # Older client may not accept kwargs the same way; fall back to direct call
+                    response = self.client.pages.create(parent=parent, properties=properties, children=blocks[:100])
                 last_exc = None
                 logging.info("Notion publish succeeded on attempt %d", attempt)
                 break
@@ -872,9 +891,75 @@ class NotionPublisher:
                 # If it's a property-type error, attempt the Status/Minimal fallbacks before retrying
                 try:
                     db_props = db_props if 'db_props' in locals() else self._get_database_properties()
+                    # If Status property exists, ensure the chosen option is valid for the DB schema
                     if "Status" in properties and "Status" in db_props:
                         prop_type = db_props["Status"].get("type")
-                        # Try the other type if mismatch appears
+                        desired = None
+                        if "status" in properties.get("Status", {}):
+                            desired = properties["Status"]["status"].get("name")
+                        elif "select" in properties.get("Status", {}):
+                            desired = properties["Status"]["select"].get("name")
+
+                        def _normalize_status_name(s: str) -> str:
+                            s = str(s or "").strip()
+                            s = s.replace("_", " ")
+                            s = s.replace("-", " ")
+                            if s.lower() == "in progress":
+                                return "In Progress"
+                            if s.lower() == "inprogress":
+                                return "In Progress"
+                            if s.lower() == "in_progress":
+                                return "In Progress"
+                            if s.lower() == "published":
+                                return "Published"
+                            if s.lower() == "draft":
+                                return "Draft"
+                            return s.title()
+
+                        if desired:
+                            desired_norm = _normalize_status_name(desired)
+                        else:
+                            desired_norm = None
+
+                        # Inspect allowed options for the property
+                        allowed_options = []
+                        try:
+                            prop_payload = db_props.get("Status", {})
+                            ptype = prop_payload.get("type")
+                            opts = prop_payload.get(ptype, {}).get("options") if ptype else None
+                            if not opts:
+                                # Try alternate structures
+                                opts = prop_payload.get("status", {}).get("options") or prop_payload.get("select", {}).get("options")
+                            if opts:
+                                allowed_options = [o.get("name", "").strip() for o in opts]
+                        except Exception:
+                            allowed_options = []
+
+                        # If desired is present and not allowed, attempt to upsert the option (select/status)
+                        if desired_norm and desired_norm not in [a.strip() for a in allowed_options]:
+                            try:
+                                # For select/status types we can attempt to add the option to the database schema
+                                if prop_type in ("select", "status"):
+                                    logging.info("Adding missing Status option '%s' to database schema", desired_norm)
+                                    # Retrieve existing options payload
+                                    options_payload = prop_payload.get(prop_type, {}).get("options", []) if prop_payload.get(prop_type) else []
+                                    # Append new option
+                                    options_payload.append({"name": desired_norm})
+                                    update_payload = {"properties": {"Status": {prop_type: {"options": options_payload}}}}
+                                    try:
+                                        # Attempt to update the database schema to include the new option
+                                        self.client.databases.update(self.config.database_id, **update_payload)
+                                        # Refresh db_props
+                                        db_props = self._get_database_properties()
+                                        logging.info("Status option upserted; retrying publish")
+                                        response = self.client.pages.create(parent=parent, properties=properties, children=blocks[:100])
+                                        last_exc = None
+                                        break
+                                    except Exception:
+                                        logging.exception("Failed to upsert Status option; will fallback to minimal create")
+                            except Exception:
+                                logging.exception("Status option upsert attempt failed")
+                        # If types mismatch, try alternate representation
                         if prop_type == "status" and "select" in properties["Status"]:
                             properties["Status"] = {"status": {"name": properties["Status"]["select"]["name"]}}
                             logging.info("Retrying with Status as 'status' type")
