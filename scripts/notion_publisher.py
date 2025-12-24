@@ -585,6 +585,7 @@ class NotionPublisher:
         doc_date: str = None,
         filename: str = None,
         use_enhanced_formatting: bool = True,
+        dry_run: bool = False,
     ) -> Dict[str, str]:
         """Publish a document to Notion."""
 
@@ -631,6 +632,69 @@ class NotionPublisher:
                 blocks = self.markdown_to_blocks(body)
         else:
             blocks = self.markdown_to_blocks(body)
+
+        # Frontmatter validation and tag normalization
+        def _validate_frontmatter(meta_obj: Dict) -> List[str]:
+            errs = []
+            # Validate date if present (simple checks)
+            try:
+                if meta_obj.get("date"):
+                    d = str(meta_obj.get("date"))
+                    valid = False
+                    # Try ISO-like
+                    try:
+                        datetime.fromisoformat(d.split("T")[0])
+                        valid = True
+                    except Exception:
+                        pass
+                    # Try common formats
+                    if not valid:
+                        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%m/%d/%Y", "%Y/%m/%d"):
+                            try:
+                                datetime.strptime(d, fmt)
+                                valid = True
+                                break
+                            except Exception:
+                                continue
+                    if not valid:
+                        errs.append(f"Invalid date format: {meta_obj.get('date')}")
+            except Exception:
+                errs.append("Date validation error")
+
+            # Validate tags
+            try:
+                t = meta_obj.get("tags")
+                if t and not isinstance(t, (list, tuple)):
+                    errs.append("'tags' should be a list in frontmatter")
+            except Exception:
+                errs.append("Tags validation error")
+
+            return errs
+
+        def _normalize_tags(tag_list: List[str]) -> List[str]:
+            out = []
+            for t in (tag_list or []):
+                try:
+                    tn = str(t).strip()
+                    # Remove stray punctuation
+                    tn = re.sub(r"[^A-Za-z0-9\-\._ /]", "", tn)
+                    # If looks like a ticker symbol, uppercase
+                    if tn.isupper() or (len(tn) <= 5 and tn.replace('.', '').isalpha()):
+                        tn = tn.upper()
+                    else:
+                        tn = tn.title()
+                    if tn and tn not in out:
+                        out.append(tn)
+                except Exception:
+                    continue
+            return out
+
+        # Run frontmatter validation
+        fm_errors = _validate_frontmatter(meta)
+        # Normalize tag list for properties
+        if tags is None:
+            tags = meta.get("tags") if isinstance(meta.get("tags"), list) else tags
+        tags = _normalize_tags(tags or [])
 
         # Build properties - start with required title
         properties = {"title": {"title": [{"text": {"content": title}}]}}
@@ -746,6 +810,33 @@ class NotionPublisher:
             # Leave parent as database_id on any error to preserve backwards compatibility
             parent = {"database_id": self.config.database_id}
 
+        # Before attempting API calls: if dry_run, validate blocks and properties only
+        def _validate_blocks_for_notion(blocks_list: List[Dict]) -> List[str]:
+            errs = []
+            # Validate table structures: each table_row must match parent table_width
+            for b in blocks_list:
+                try:
+                    if b.get("type") == "table":
+                        t = b.get("table", {})
+                        width = int(t.get("table_width", 0) or 0)
+                        children = t.get("children", [])
+                        for idx, r in enumerate(children):
+                            cells = r.get("table_row", {}).get("cells", [])
+                            if len(cells) != width:
+                                errs.append(f"Table row {idx} has {len(cells)} cells but table_width is {width}")
+                except Exception:
+                    errs.append("Table validation error")
+            return errs
+
+        if dry_run:
+            # Combine frontmatter and block validations and return a report without calling Notion
+            block_errors = _validate_blocks_for_notion(blocks)
+            errors = fm_errors + block_errors
+            if errors:
+                return {"dry_run": True, "valid": False, "errors": errors, "blocks": len(blocks)}
+            else:
+                return {"dry_run": True, "valid": True, "blocks": len(blocks)}
+
         # Create page with robust retry logic, exponential backoff, jitter and structured logging
         attempts = 5
         base_delay = 1
@@ -830,7 +921,7 @@ class NotionPublisher:
         return {"page_id": page_id, "url": url, "type": doc_type, "tags": tags}
 
     def sync_file(
-        self, filepath: str, doc_type: str = None, tags: List[str] = None, force: bool = False
+        self, filepath: str, doc_type: str = None, tags: List[str] = None, force: bool = False, dry_run: bool = False
     ) -> Dict[str, str]:
         """
         Sync a local file to Notion with deduplication.
@@ -1019,7 +1110,7 @@ class NotionPublisher:
                     return s
 
             title = _sanitize_title(title)
-            result = self.publish(title=title, content=content, doc_type=doc_type, tags=tags, filename=filename)
+                result = self.publish(title=title, content=content, doc_type=doc_type, tags=tags, filename=filename, dry_run=dry_run)
 
             # Record the sync in the database, using the strong fingerprint when available
             if DB_AVAILABLE:
@@ -1102,7 +1193,7 @@ class NotionPublisher:
         return results
 
 
-def sync_all_outputs(output_dir: str = None, force: bool = False) -> Dict[str, Any]:
+def sync_all_outputs(output_dir: str = None, force: bool = False, dry_run: bool = False) -> Dict[str, Any]:
     """
     Sync all Gold Standard outputs to Notion with intelligent deduplication.
 
@@ -1138,7 +1229,16 @@ def sync_all_outputs(output_dir: str = None, force: bool = False) -> Dict[str, A
 
     for filepath in md_files:
         try:
-            result = publisher.sync_file(str(filepath), force=force)
+            result = publisher.sync_file(str(filepath), force=force, dry_run=dry_run)
+
+            # Support future dry-run flows where sync_file returns dry_run results
+            if result.get("dry_run"):
+                if result.get("valid"):
+                    results["success"].append({"file": filepath.name, "dry_run": True, "blocks": result.get("blocks")})
+                else:
+                    results["failed"].append({"file": filepath.name, "error": result.get("errors")})
+                    print(f"✗ {filepath.name} (dry-run): {result.get('errors')}")
+                continue
 
             if result.get("skipped"):
                 results["skipped"].append({"file": filepath.name, "reason": result.get("reason", "unchanged")})
@@ -1152,8 +1252,8 @@ def sync_all_outputs(output_dir: str = None, force: bool = False) -> Dict[str, A
             results["failed"].append({"file": filepath.name, "error": str(e)})
             print(f"✗ {filepath.name}: {e}")
 
-    # Mark task as run
-    if DB_AVAILABLE:
+    # Mark task as run (only for real runs)
+    if DB_AVAILABLE and not dry_run:
         db = get_db()
         db.mark_task_run("notion_sync")
 
@@ -1174,6 +1274,7 @@ if __name__ == "__main__":
     parser.add_argument("--type", type=str, help="Filter by type")
     parser.add_argument("--test", action="store_true", help="Test connection")
     parser.add_argument("--force", action="store_true", help="Force sync even if unchanged")
+    parser.add_argument("--dry-run", action="store_true", help="Validate publish without creating pages")
     parser.add_argument("--status", action="store_true", help="Show sync status")
     args = parser.parse_args()
 
@@ -1204,14 +1305,14 @@ if __name__ == "__main__":
 
         elif args.file:
             publisher = NotionPublisher()
-            result = publisher.sync_file(args.file, force=args.force)
+            result = publisher.sync_file(args.file, force=args.force, dry_run=args.dry_run)
             if result.get("skipped"):
                 print(f"⏭ Skipped: {result.get('reason')}")
             else:
                 print(f"✓ Published: {result['url']}")
 
         elif args.sync_all:
-            results = sync_all_outputs(force=args.force)
+            results = sync_all_outputs(force=args.force, dry_run=args.dry_run)
             print(f"\n✓ Success: {len(results['success'])}")
             print(f"⏭ Skipped: {len(results.get('skipped', []))}")
             print(f"✗ Failed: {len(results['failed'])}")

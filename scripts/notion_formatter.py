@@ -264,7 +264,8 @@ def table_block(rows: List[List[str]], has_header: bool = True) -> List[Dict]:
     if not rows:
         return []
 
-    table_width = len(rows[0]) if rows else 0
+    # Determine table width as the maximum number of cells in any row
+    table_width = max((len(r) for r in rows), default=0)
 
     table = {
         "object": "block",
@@ -273,8 +274,10 @@ def table_block(rows: List[List[str]], has_header: bool = True) -> List[Dict]:
     }
 
     for row in rows:
+        # Normalize each row to the table_width by padding empty cells or truncating
+        norm = list(row)[:table_width] + [""] * max(0, table_width - len(row))
         cells = []
-        for cell in row:
+        for cell in norm:
             cells.append([rich_text(str(cell))])
 
         table["table"]["children"].append({"object": "block", "type": "table_row", "table_row": {"cells": cells}})
