@@ -8,7 +8,7 @@ providers:
   - name: 'Syndicate Dashboards'
     orgId: 1
     folder: 'Syndicate'
-    folderUid: 'gold-standard'
+    folderUid: 'syndicate'
     type: file
     disableDeletion: false
     updateIntervalSeconds: 30

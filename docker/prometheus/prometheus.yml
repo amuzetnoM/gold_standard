@@ -27,7 +27,7 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    monitor: 'gold-standard-monitor'
+    monitor: 'syndicate-monitor'
     environment: 'production'
 
 # Alertmanager configuration
@@ -50,7 +50,7 @@ scrape_configs:
     metrics_path: /metrics
 
   # Syndicate Application
-  - job_name: 'gold-standard'
+  - job_name: 'syndicate'
     static_configs:
       - targets: ['gost:8080']
     metrics_path: /metrics

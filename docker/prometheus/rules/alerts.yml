@@ -7,7 +7,7 @@ groups:
     rules:
       # Application Health
       - alert: GoldStandardDown
-        expr: up{job="gold-standard"} == 0
+        expr: up{job="syndicate"} == 0
         for: 1m
         labels:
           severity: critical
@@ -16,7 +16,7 @@ groups:
           description: "Syndicate has been unreachable for more than 1 minute."
 
       - alert: GoldStandardHighCPU
-        expr: rate(container_cpu_usage_seconds_total{name="gold-standard"}[5m]) > 0.8
+        expr: rate(container_cpu_usage_seconds_total{name="syndicate"}[5m]) > 0.8
         for: 5m
         labels:
           severity: warning
@@ -25,7 +25,7 @@ groups:
           description: "Syndicate CPU usage is above 80% for 5 minutes."
 
       - alert: GoldStandardHighMemory
-        expr: container_memory_usage_bytes{name="gold-standard"} / container_spec_memory_limit_bytes{name="gold-standard"} > 0.85
+        expr: container_memory_usage_bytes{name="syndicate"} / container_spec_memory_limit_bytes{name="syndicate"} > 0.85
         for: 5m
         labels:
           severity: warning
@@ -63,7 +63,7 @@ groups:
           description: "Disk usage is above 85% on root filesystem."
 
       - alert: ContainerRestarting
-        expr: changes(container_start_time_seconds{name="gold-standard"}[15m]) > 2
+        expr: changes(container_start_time_seconds{name="syndicate"}[15m]) > 2
         for: 0m
         labels:
           severity: warning

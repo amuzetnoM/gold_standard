@@ -58,7 +58,7 @@ class GoldStandard:
             # Installed package - use current directory
             return cwd
 
-        # Development mode - go up from src/gost to gold_standard
+        # Development mode - go up from src/gost to syndicate
         return package_dir.parent.parent
 
     def _setup_paths(self):

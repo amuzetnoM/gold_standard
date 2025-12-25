@@ -1,6 +1,6 @@
 #!/bin/sh
 ## Syndicate - Notion Sync Service
-# Copy to /etc/systemd/system/gold-standard-notion-sync.service and adjust paths as needed
+# Copy to /etc/systemd/system/syndicate-notion-sync.service and adjust paths as needed
 
 [Unit]
 Description=Syndicate Notion Sync Service
