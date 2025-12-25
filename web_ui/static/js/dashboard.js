@@ -273,15 +273,20 @@ function refreshData() {
 async function runAnalysis() {
     showNotification('Starting analysis...', 'info');
     updateStatus('Running analysis...', 'warning');
-    
     try {
-        // In a real implementation, this would trigger the analysis
-        // For now, we'll simulate it
-        setTimeout(() => {
-            showNotification('Analysis completed', 'success');
-            updateStatus('Connected', 'success');
-            loadAllData();
-        }, 2000);
+        const res = await fetch('/api/run', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            showNotification('Analysis queued (PID: ' + data.pid + ')', 'success');
+            // Poll for completion by reloading data after a delay
+            setTimeout(() => {
+                loadAllData();
+                updateStatus('Connected', 'success');
+            }, 5000);
+        } else {
+            showNotification('Failed to start analysis: ' + (data.message || 'unknown'), 'error');
+            updateStatus('Error', 'error');
+        }
     } catch (error) {
         console.error('Failed to run analysis:', error);
         showNotification('Analysis failed: ' + error.message, 'error');

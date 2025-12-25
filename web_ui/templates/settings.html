@@ -1,0 +1,51 @@
+{% extends "index.html" %}
+
+{% block content %}
+<main class="main-content">
+    <header class="header">
+        <div class="header-title">
+            <h1>Settings</h1>
+            <p class="subtitle">Feature toggles and configuration</p>
+        </div>
+    </header>
+
+    <div class="dashboard-grid">
+        <section class="card settings-card">
+            <div class="card-header"><h2>Feature Toggles</h2></div>
+            <div class="card-body">
+                <div id="toggles-list">Loading toggles...</div>
+            </div>
+        </section>
+    </div>
+</main>
+
+<script>
+async function loadToggles() {
+    try {
+        const res = await fetch('/api/toggles');
+        const data = await res.json();
+        const el = document.getElementById('toggles-list');
+        if (data.status === 'ok') {
+            const toggles = data.toggles || {};
+            el.innerHTML = Object.keys(toggles).map(k => `
+                <div class="toggle-item">
+                    <span class="label">${k}</span>
+                    <button class="btn" onclick="toggleFeature('${k}')">${toggles[k] ? 'Disable' : 'Enable'}</button>
+                </div>
+            `).join('');
+        }
+    } catch (e) { console.error(e); }
+}
+
+async function toggleFeature(feature) {
+    // Map friendly names used in UI to API feature keys
+    const map = { 'notion_publishing': 'notion', 'task_execution': 'tasks', 'insights_extraction': 'insights' };
+    const apiKey = map[feature] || feature;
+    const res = await fetch(`/api/toggles/${apiKey}`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ enabled: true }) });
+    loadToggles();
+}
+
+document.addEventListener('DOMContentLoaded', loadToggles);
+</script>
+
+{% endblock %}

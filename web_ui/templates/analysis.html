@@ -1,0 +1,73 @@
+{% extends "index.html" %}
+
+{% block content %}
+<!-- Reuse main layout but focus on analysis: larger chart and report list -->
+<main class="main-content">
+    <header class="header">
+        <div class="header-title">
+            <h1>Analysis</h1>
+            <p class="subtitle">Charts, reports, and deep analysis</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" onclick="refreshData()">Refresh</button>
+            <button class="btn btn-primary" onclick="runAnalysis()">Run Analysis</button>
+        </div>
+    </header>
+
+    <div class="dashboard-grid">
+        <section class="card charts-section" style="grid-column: 1 / span 2;">
+            <div class="card-header"><h2>Primary Chart</h2></div>
+            <div class="card-body">
+                <div class="chart-container" id="chart-container-large">
+                    <img id="chart-image" src="" alt="Loading chart..." class="chart-image">
+                </div>
+            </div>
+        </section>
+
+        <section class="card reports-section" style="grid-column: 1 / span 1;">
+            <div class="card-header"><h2>Recent Reports</h2></div>
+            <div class="card-body">
+                <div id="reports-list">
+                    <div class="loading"><p>Loading reports...</p></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card analysis-notes" style="grid-column: 2 / span 1;">
+            <div class="card-header"><h2>Notes</h2></div>
+            <div class="card-body">
+                <div id="analysis-notes-content">No notes yet.</div>
+            </div>
+        </section>
+    </div>
+</main>
+
+<script>
+async function loadReports() {
+    try {
+        const res = await fetch('/api/reports');
+        const data = await res.json();
+        const el = document.getElementById('reports-list');
+        if (data.status === 'ok') {
+            if (!data.reports.length) {
+                el.innerHTML = '<div class="loading"><p>No reports available</p></div>';
+                return;
+            }
+            el.innerHTML = data.reports.map(r => `
+                <div class="report-item">
+                    <a href="${r.url}" target="_blank">${r.name}</a>
+                    <div class="muted">${new Date(r.modified).toLocaleString()}</div>
+                </div>
+            `).join('');
+        }
+    } catch (e) {
+        console.error('Failed to load reports', e);
+    }
+}
+
+// load on page ready
+document.addEventListener('DOMContentLoaded', () => {
+    loadReports();
+});
+</script>
+{% endblock %}

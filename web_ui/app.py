@@ -223,35 +223,40 @@ def api_charts():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@app.route('/api/memory')
-def api_memory():
-    """Get cortex memory state"""
+@app.route('/api/reports')
+def api_reports():
+    """List available report markdown files"""
     try:
-        memory_file = DATA_DIR / "cortex_memory.json"
-        
-        if memory_file.exists():
-            memory = json.loads(memory_file.read_text())
-            return jsonify({
-                'status': 'ok',
-                'memory': memory
-            })
-        
-        # Try database
-        db = get_db()
-        memory = db.get_cortex_memory()
-        if memory:
-            return jsonify({
-                'status': 'ok',
-                'memory': memory
-            })
-        
-        return jsonify({
-            'status': 'not_found',
-            'message': 'No memory data available'
-        }), 404
-        
+        reports = []
+        if REPORTS_DIR.exists():
+            for rpt in sorted(REPORTS_DIR.glob('**/*.md'), key=lambda p: p.stat().st_mtime, reverse=True):
+                reports.append({
+                    'name': rpt.name,
+                    'path': str(rpt),
+                    'url': f'/reports/{rpt.name}',
+                    'modified': datetime.fromtimestamp(rpt.stat().st_mtime).isoformat(),
+                    'size': rpt.stat().st_size,
+                })
+        return jsonify({'status': 'ok', 'reports': reports})
     except Exception as e:
-        logger.error(f"Memory API error: {e}")
+        logger.error(f"Reports API error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/run', methods=['POST'])
+def api_run():
+    """Trigger a single analysis run (background). Returns PID or error."""
+    try:
+        # Spawn a detached child process to run the analysis once.
+        # Use env GOLD_STANDARD_DB if already configured by server
+        python_exe = sys.executable or 'python3'
+        cmd = [python_exe, os.path.join(PROJECT_ROOT, 'run.py'), '--once']
+        # Start as background process
+        proc = subprocess.Popen(cmd, cwd=PROJECT_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        logger.info(f"Spawned analysis run (PID: {proc.pid})")
+        return jsonify({'status': 'ok', 'pid': proc.pid})
+    except Exception as e:
+        logger.error(f"Run API error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 

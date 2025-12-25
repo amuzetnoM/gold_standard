@@ -1,0 +1,55 @@
+{% extends "index.html" %}
+
+{% block content %}
+<main class="main-content">
+    <header class="header">
+        <div class="header-title">
+            <h1>Tasks</h1>
+            <p class="subtitle">View and manage system tasks</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" onclick="refreshData()">Refresh</button>
+        </div>
+    </header>
+
+    <div class="dashboard-grid">
+        <section class="card tasks-full">
+            <div class="card-header"><h2>Pending & Ready Tasks</h2></div>
+            <div class="card-body">
+                <div id="tasks-full-list">
+                    <div class="loading"><p>Loading tasks...</p></div>
+                </div>
+            </div>
+        </section>
+    </div>
+</main>
+
+<script>
+async function loadAllTasks() {
+    try {
+        const res = await fetch('/api/tasks?limit=100');
+        const data = await res.json();
+        const el = document.getElementById('tasks-full-list');
+        if (data.status === 'ok') {
+            const combined = [...(data.ready || []), ...(data.pending || []), ...(data.scheduled || [])];
+            if (!combined.length) {
+                el.innerHTML = '<div class="loading"><p>No tasks available</p></div>';
+                return;
+            }
+            el.innerHTML = combined.map(t => `
+                <div class="task-item">
+                    <div class="task-header"><strong>${t.title || t.action_type || 'Task'}</strong>
+                    <span class="task-status ${t.status}">${t.status}</span></div>
+                    <div class="task-desc">${t.description || t.result || ''}</div>
+                </div>
+            `).join('');
+        }
+    } catch (e) {
+        console.error('Failed to load tasks', e);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => loadAllTasks());
+</script>
+
+{% endblock %}
