@@ -44,7 +44,7 @@ def enable_unit(unit: str) -> None:
 
 
 if __name__ == "__main__":
-    logger.info("Gold Standard service monitor starting (interval=%s)" % CHECK_INTERVAL)
+    logger.info("Syndicate service monitor starting (interval=%s)" % CHECK_INTERVAL)
 
     while True:
         try:

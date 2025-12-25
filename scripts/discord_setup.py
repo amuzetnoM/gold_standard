@@ -57,7 +57,7 @@ def write_env_var(key: str, value: str, env_path: str = ENV_PATH) -> None:
     LOG.info("Wrote %s to %s", key, env_path)
 
 
-def test_webhook(url: str, message: str = "[Gold Standard] Test message") -> bool:
+def test_webhook(url: str, message: str = "[Syndicate] Test message") -> bool:
     if requests is None:
         LOG.error("requests package is not installed. Install with: pip install requests")
         return False

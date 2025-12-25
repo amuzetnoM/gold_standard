@@ -57,7 +57,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 try:
     # Ensure environment variables from repo `.env` are available to the daemon
-    from gold_standard.utils.env_loader import load_env
+    from syndicate.utils.env_loader import load_env
 
     load_env(PROJECT_ROOT / ".env")
 except Exception:
@@ -858,7 +858,7 @@ def is_executor_running() -> bool:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Gold Standard Task Executor Daemon",
+        description="Syndicate Task Executor Daemon",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
