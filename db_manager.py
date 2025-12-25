@@ -1241,6 +1241,27 @@ class DatabaseManager:
                 for row in cursor.fetchall()
             ]
 
+    def get_latest_journal(self) -> Optional[Dict[str, Any]]:
+        """Return the most recent journal as a dict for backward compatibility with the web UI.
+
+        Returns a dict with keys: date, content, bias, gold_price, silver_price, gsr
+        or None if no journal exists.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM journals ORDER BY date DESC LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "date": row["date"],
+                    "content": row["content"],
+                    "bias": row["bias"],
+                    "gold_price": row["gold_price"],
+                    "silver_price": row["silver_price"],
+                    "gsr": row.get("gsr") if isinstance(row, dict) else row["gsr"],
+                }
+            return None
+
     def get_journals_for_month(self, year: int, month: int) -> List[JournalEntry]:
         """Get all journals for a specific month."""
         month_prefix = f"{year:04d}-{month:02d}"
