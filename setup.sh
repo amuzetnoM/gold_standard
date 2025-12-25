@@ -1,5 +1,5 @@
 #!/bin/bash
-# Gold Standard - Automated Setup Script (Unix/macOS/Linux)
+# Syndicate - Automated Setup Script (Unix/macOS/Linux)
 # Run with: chmod +x setup.sh && ./setup.sh
 # Auto-installs Python 3.12 via brew (macOS) or apt/dnf (Linux) if needed
 
@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 echo ""
 echo "========================================"
-echo "   Gold Standard - Automated Setup"
+echo "   Syndicate - Automated Setup"
 echo "========================================"
 echo ""
 
@@ -217,7 +217,7 @@ fi
 # GGUF downloads for llama.cpp fallback
 echo -e "[8/8] Downloading GGUF models..."
 
-GGUF_DIR="$HOME/.cache/gold_standard/models"
+GGUF_DIR="$HOME/.cache/syndicate/models"
 mkdir -p "$GGUF_DIR"
 
 GGUF_FILE="$GGUF_DIR/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
