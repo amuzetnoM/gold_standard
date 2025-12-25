@@ -3,7 +3,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
 
 groups:
-  - name: gold_standard_alerts
+  - name: syndicate_alerts
     rules:
       # Application Health
       - alert: GoldStandardDown
@@ -35,7 +35,7 @@ groups:
 
       # Task Execution Alerts
       - alert: StuckTasksDetected
-        expr: gold_standard_stuck_tasks > 0
+        expr: syndicate_stuck_tasks > 0
         for: 10m
         labels:
           severity: warning
