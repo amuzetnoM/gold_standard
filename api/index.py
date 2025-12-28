@@ -9,7 +9,6 @@ import sys
 import threading
 import time
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -85,173 +84,217 @@ def start_background_worker():
     print("[VERCEL] Background worker thread started")
 
 
-class handler(BaseHTTPRequestHandler):
+def handler(request):
     """
     Vercel serverless function handler.
-    Provides health checks and status endpoints while running continuous background tasks.
+    Compatible with Vercel's Python runtime.
     """
+    # Start background worker on first request
+    start_background_worker()
     
-    def do_GET(self):
-        """Handle GET requests."""
-        try:
-            # Start background worker on first request
-            start_background_worker()
-            
-            # Parse path
-            path = self.path.split('?')[0]
-            
-            if path == '/' or path == '/health':
-                self.send_health_check()
-            elif path == '/status':
-                self.send_status()
-            elif path == '/api/health':
-                self.send_health_check()
-            elif path == '/api/status':
-                self.send_status()
+    # Get request details
+    path = request.get('path', '/')
+    method = request.get('method', 'GET')
+    
+    try:
+        if method == 'GET':
+            if path in ['/', '/health', '/api/health']:
+                return handle_health()
+            elif path in ['/status', '/api/status']:
+                return handle_status()
             else:
-                self.send_not_found()
-                
-        except Exception as e:
-            self.send_error_response(str(e))
-    
-    def do_POST(self):
-        """Handle POST requests."""
-        try:
-            # Start background worker on first request
-            start_background_worker()
-            
-            path = self.path.split('?')[0]
-            
+                return handle_not_found(path)
+        elif method == 'POST':
             if path == '/api/trigger':
-                self.trigger_analysis()
+                return handle_trigger()
             else:
-                self.send_not_found()
-                
-        except Exception as e:
-            self.send_error_response(str(e))
-    
-    def send_health_check(self):
-        """Send health check response."""
-        try:
-            # Quick health check
-            from db_manager import get_db
-            db = get_db()
-            health = db.get_system_health()
-            
-            response = {
-                'status': 'healthy',
-                'timestamp': datetime.now().isoformat(),
-                'service': 'syndicate',
-                'version': '3.7.0',
-                'background_worker': 'running' if _background_worker_started else 'not_started',
-                'health': health
+                return handle_not_found(path)
+        else:
+            return {
+                'statusCode': 405,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({
+                    'status': 'error',
+                    'error': 'Method Not Allowed',
+                    'timestamp': datetime.now().isoformat()
+                })
             }
-            
-            self.send_json_response(response, 200)
-            
-        except Exception as e:
-            self.send_json_response({
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'status': 'error',
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            })
+        }
+
+
+def handle_health():
+    """Handle health check requests."""
+    try:
+        from db_manager import get_db
+        db = get_db()
+        health = db.get_system_health()
+        
+        response = {
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'service': 'syndicate',
+            'version': '3.7.0',
+            'background_worker': 'running' if _background_worker_started else 'not_started',
+            'health': health
+        }
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps(response)
+        }
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
                 'status': 'unhealthy',
                 'error': str(e),
                 'timestamp': datetime.now().isoformat()
-            }, 500)
-    
-    def send_status(self):
-        """Send detailed status response."""
-        try:
-            from db_manager import get_db
-            db = get_db()
-            
-            # Get comprehensive status
-            health = db.get_system_health()
-            stats = db.get_statistics()
-            
-            response = {
-                'status': 'ok',
-                'timestamp': datetime.now().isoformat(),
-                'service': 'syndicate',
-                'version': '3.7.0',
-                'background_worker': 'running' if _background_worker_started else 'not_started',
-                'statistics': stats,
-                'health': health,
-                'environment': {
-                    'python_version': sys.version,
-                    'platform': sys.platform,
-                    'interval_minutes': os.getenv('RUN_INTERVAL_MINUTES', '240')
-                }
-            }
-            
-            self.send_json_response(response, 200)
-            
-        except Exception as e:
-            self.send_error_response(str(e))
-    
-    def trigger_analysis(self):
-        """Manually trigger an analysis cycle."""
-        try:
-            from main import Config, setup_logging, create_llm_provider, execute
-            import run
-            
-            config = Config()
-            logger = setup_logging(config)
-            model = create_llm_provider(config, logger)
-            
-            # Run analysis
-            success = execute(config, logger, model=model, dry_run=False, no_ai=False, force=False)
-            
-            if success:
-                # Run post-analysis tasks
-                run._run_post_analysis_tasks(
-                    force_inline=True,
-                    wait_for_completion=True,
-                    max_wait_seconds=60
-                )
-            
-            response = {
-                'status': 'success' if success else 'failed',
-                'timestamp': datetime.now().isoformat(),
-                'message': 'Analysis cycle completed' if success else 'Analysis cycle failed'
-            }
-            
-            self.send_json_response(response, 200 if success else 500)
-            
-        except Exception as e:
-            self.send_error_response(str(e))
-    
-    def send_json_response(self, data, status_code=200):
-        """Send JSON response."""
-        self.send_response(status_code)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
-    
-    def send_error_response(self, error_message, status_code=500):
-        """Send error response."""
-        response = {
-            'status': 'error',
-            'error': error_message,
-            'timestamp': datetime.now().isoformat()
+            })
         }
-        self.send_json_response(response, status_code)
-    
-    def send_not_found(self):
-        """Send 404 response."""
+
+
+def handle_status():
+    """Handle status requests."""
+    try:
+        from db_manager import get_db
+        db = get_db()
+        
+        health = db.get_system_health()
+        stats = db.get_statistics()
+        
         response = {
+            'status': 'ok',
+            'timestamp': datetime.now().isoformat(),
+            'service': 'syndicate',
+            'version': '3.7.0',
+            'background_worker': 'running' if _background_worker_started else 'not_started',
+            'statistics': stats,
+            'health': health,
+            'environment': {
+                'python_version': sys.version,
+                'platform': sys.platform,
+                'interval_minutes': os.getenv('RUN_INTERVAL_MINUTES', '240')
+            }
+        }
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps(response)
+        }
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'status': 'error',
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            })
+        }
+
+
+def handle_trigger():
+    """Handle manual trigger requests."""
+    try:
+        from main import Config, setup_logging, create_llm_provider, execute
+        import run
+        
+        config = Config()
+        logger = setup_logging(config)
+        model = create_llm_provider(config, logger)
+        
+        # Run analysis
+        success = execute(config, logger, model=model, dry_run=False, no_ai=False, force=False)
+        
+        if success:
+            # Run post-analysis tasks with timeout
+            run._run_post_analysis_tasks(
+                force_inline=True,
+                wait_for_completion=True,
+                max_wait_seconds=60
+            )
+        
+        response = {
+            'status': 'success' if success else 'failed',
+            'timestamp': datetime.now().isoformat(),
+            'message': 'Analysis cycle completed' if success else 'Analysis cycle failed'
+        }
+        
+        return {
+            'statusCode': 200 if success else 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps(response)
+        }
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'status': 'error',
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            })
+        }
+
+
+def handle_not_found(path):
+    """Handle 404 responses."""
+    return {
+        'statusCode': 404,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({
             'status': 'error',
             'error': 'Not Found',
-            'path': self.path,
+            'path': path,
             'timestamp': datetime.now().isoformat()
-        }
-        self.send_json_response(response, 404)
+        })
+    }
 
 
-# For local testing
+# For local testing with HTTP server
 if __name__ == '__main__':
-    from http.server import HTTPServer
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    
+    class LocalHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            result = handler({'path': self.path, 'method': 'GET'})
+            self.send_response(result['statusCode'])
+            for key, value in result.get('headers', {}).items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(result['body'].encode())
+        
+        def do_POST(self):
+            result = handler({'path': self.path, 'method': 'POST'})
+            self.send_response(result['statusCode'])
+            for key, value in result.get('headers', {}).items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(result['body'].encode())
     
     port = int(os.getenv('PORT', 8080))
-    server = HTTPServer(('0.0.0.0', port), handler)
+    server = HTTPServer(('0.0.0.0', port), LocalHandler)
     print(f"[VERCEL] Starting test server on port {port}")
     print(f"[VERCEL] Health check: http://localhost:{port}/health")
     print(f"[VERCEL] Status: http://localhost:{port}/status")
