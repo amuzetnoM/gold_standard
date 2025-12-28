@@ -1,0 +1,64 @@
+name: Keep Vercel Alive
+
+on:
+  schedule:
+    # Run every 10 minutes to keep Vercel function warm and operational
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  ping-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Health Endpoint
+        run: |
+          # Get the Vercel deployment URL from secrets
+          VERCEL_URL="${{ secrets.VERCEL_DEPLOYMENT_URL }}"
+          
+          if [ -z "$VERCEL_URL" ]; then
+            echo "⚠️  VERCEL_DEPLOYMENT_URL not set in secrets"
+            echo "Please add your Vercel URL to repository secrets"
+            echo "Example: https://syndicate-abc123.vercel.app"
+            exit 0
+          fi
+          
+          echo "🔄 Pinging Vercel deployment: $VERCEL_URL"
+          
+          # Ping health endpoint
+          echo "Checking health endpoint..."
+          HEALTH_RESPONSE=$(curl -s -w "\n%{http_code}" "$VERCEL_URL/health")
+          HEALTH_CODE=$(echo "$HEALTH_RESPONSE" | tail -n 1)
+          HEALTH_BODY=$(echo "$HEALTH_RESPONSE" | head -n -1)
+          
+          if [ "$HEALTH_CODE" = "200" ]; then
+            echo "✅ Health check passed (HTTP $HEALTH_CODE)"
+            echo "$HEALTH_BODY" | jq '.' || echo "$HEALTH_BODY"
+          else
+            echo "❌ Health check failed (HTTP $HEALTH_CODE)"
+            echo "$HEALTH_BODY"
+          fi
+          
+          # Ping status endpoint for detailed info
+          echo ""
+          echo "Checking status endpoint..."
+          STATUS_RESPONSE=$(curl -s -w "\n%{http_code}" "$VERCEL_URL/status")
+          STATUS_CODE=$(echo "$STATUS_RESPONSE" | tail -n 1)
+          STATUS_BODY=$(echo "$STATUS_RESPONSE" | head -n -1)
+          
+          if [ "$STATUS_CODE" = "200" ]; then
+            echo "✅ Status check passed (HTTP $STATUS_CODE)"
+            echo "$STATUS_BODY" | jq '.statistics' || echo "$STATUS_BODY"
+          else
+            echo "❌ Status check failed (HTTP $STATUS_CODE)"
+            echo "$STATUS_BODY"
+          fi
+          
+          echo ""
+          echo "📊 Keep-alive ping completed at $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+
+      - name: Report Status
+        if: failure()
+        run: |
+          echo "🔴 Keep-alive check failed!"
+          echo "This may indicate issues with the Vercel deployment."
+          echo "Check Vercel logs: https://vercel.com/dashboard"
