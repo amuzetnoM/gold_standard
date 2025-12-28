@@ -7,12 +7,12 @@
 # /_______  /|___||____|_  /___|______/ /_______  (____  /____/   __/|___|  (____  /
 #         \/             \/                     \/     \/     |__|        \/     \/
 #
-# Gold Standard - Precious Metals Intelligence System
+# Syndicate - Precious Metals Intelligence System
 # Copyright (c) 2025 SIRIUS Alpha
 # All rights reserved.
 # ══════════════════════════════════════════════════════════════════════════════
 """
-Gold Standard CLI
+Syndicate CLI
 Unified entry point with intelligent report management.
 Runs all analysis with automatic redundancy control.
 
@@ -367,7 +367,7 @@ def _signal_handler(signum, frame):
 
 def run_daemon(no_ai: bool = False, interval_hours: int = 0, interval_minutes: int = 1):
     """
-    Run Gold Standard as an autonomous daemon.
+    Run Syndicate as an autonomous daemon.
     Executes analysis immediately, then at specified intervals.
 
     Args:
@@ -894,6 +894,8 @@ def _run_post_analysis_tasks(force_inline: bool = False, wait_for_completion: bo
                                 "_act-",  # Action task outputs (e.g., research_ACT-20251203-0001)
                                 "act-",  # Action task files
                                 "file_index",  # Index files
+                                "digest_",  # Automatically generated daily digests
+                                "digests/",  # Files under the digests folder
                             ]
                             if any(p in filename for p in excluded_patterns):
                                 return False
@@ -972,6 +974,18 @@ def _run_post_analysis_tasks(force_inline: bool = False, wait_for_completion: bo
 
                                 # Check type-aware schedule
                                 doc_type = "journal" if "Journal_" in filepath.name else "reports"
+                                # Ensure executor-only files and digests are never published (extra safety)
+                                fname_l = filepath.name.lower()
+                                if any(p.lower() in fname_l or p.lower() in str(filepath).lower() for p in [
+                                    "monitor_",
+                                    "data_fetch_",
+                                    "digest_",
+                                    "digests/",
+                                    "_act-",
+                                    "act-",
+                                ]):
+                                    skipped_schedule += 1
+                                    continue
                                 if not should_sync_doc(filepath, doc_type):
                                     skipped_schedule += 1
                                     continue
@@ -1221,7 +1235,7 @@ def handle_lifecycle_command(action: str, target_file: str = None, filter_status
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Gold Standard CLI - Autonomous precious metals analysis system. Runs continuously by default.",
+        description="Syndicate CLI - Autonomous precious metals analysis system. Runs continuously by default.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

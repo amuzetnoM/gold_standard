@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from discord.ext import commands, tasks
 
 LOG = logging.getLogger("digest_bot.discord.alerting")
@@ -28,16 +28,16 @@ class AlertingCog(commands.Cog):
             qlen = db.get_llm_queue_length()
             # Alert if above threshold and hasn't alerted in last 30 minutes
             if qlen > QUEUE_THRESHOLD:
-                if not self._last_queue_alert or (datetime.utcnow() - self._last_queue_alert) > timedelta(minutes=30):
+                if not self._last_queue_alert or (datetime.now(timezone.utc) - self._last_queue_alert) > timedelta(minutes=30):
                     await self._notify_subscribers("queue", f"LLM queue length high: {qlen} pending tasks")
-                    self._last_queue_alert = datetime.utcnow()
+                    self._last_queue_alert = datetime.now(timezone.utc)
 
             # Check sanitizer corrections in last hour
             corrections = db.get_recent_sanitizer_total(hours=1)
             if corrections >= SANITIZER_THRESHOLD:
-                if not self._last_sanitizer_alert or (datetime.utcnow() - self._last_sanitizer_alert) > timedelta(minutes=30):
+                if not self._last_sanitizer_alert or (datetime.now(timezone.utc) - self._last_sanitizer_alert) > timedelta(minutes=30):
                     await self._notify_subscribers("sanitizer", f"Sanitizer corrections (last 1h): {corrections}")
-                    self._last_sanitizer_alert = datetime.utcnow()
+                    self._last_sanitizer_alert = datetime.now(timezone.utc)
         except Exception:
             LOG.exception("Error in alerting check loop")
 

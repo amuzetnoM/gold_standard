@@ -9,6 +9,7 @@ explicit webhook passed via --webhook.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import Path
 import logging
 import argparse
 from typing import Optional
@@ -16,10 +17,76 @@ from typing import Optional
 from . import __version__ as DIGEST_BOT_VERSION
 from db_manager import DatabaseManager
 from scripts.notifier import send_discord
+from .discord import templates as discord_templates
 
 LOG = logging.getLogger("digest_bot.daily_report")
 
 DEFAULT_HOURS = 24
+
+
+import glob
+import os
+
+
+def _extract_premarket_summary() -> tuple[str, str, str]:
+    """Find the latest premarket file and extract Overall Bias, Rationale and Notion URL if available.
+
+    Returns (bias, rationale, notion_url) — empty strings if not found.
+    """
+    import sqlite3
+
+    # Allow tests to override the project base dir via GOLD_STANDARD__BASE
+    base_dir = os.getenv("GOLD_STANDARD__BASE") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    reports_dir = os.path.join(base_dir, "output", "reports")
+
+    # Find the newest premarket file
+    candidates = glob.glob(os.path.join(reports_dir, "premarket_*.md"))
+    if not candidates:
+        # also check premarket subdir
+        candidates = glob.glob(os.path.join(reports_dir, "premarket", "*premarket*2025-*.md"))
+    if not candidates:
+        return "", "", ""
+
+    latest = sorted(candidates)[-1]
+
+    bias = ""
+    rationale = ""
+    try:
+        with open(latest, "r", encoding="utf-8") as f:
+            text = f.read()
+        # Simple parsing
+        m_bias = None
+        m_rat = None
+        for line in text.splitlines():
+            l = line.strip()
+            if l.startswith("*   **Overall Bias:**") or l.startswith("* **Overall Bias:**"):
+                m_bias = l
+            if l.startswith("*   **Rationale:**") or l.startswith("* **Rationale:**"):
+                m_rat = l
+            if m_bias and m_rat:
+                break
+        if m_bias:
+            # extract after colon
+            bias = m_bias.split(":", 1)[1].strip()
+        if m_rat:
+            rationale = m_rat.split(":", 1)[1].strip()
+    except Exception:
+        bias = ""
+        rationale = ""
+
+    notion_url = ""
+    try:
+        db = DatabaseManager()
+        with db._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT notion_url FROM notion_sync WHERE file_path = ? ORDER BY synced_at DESC LIMIT 1", (latest,))
+            row = cur.fetchone()
+            if row and row[0]:
+                notion_url = row[0]
+    except Exception:
+        notion_url = ""
+
+    return bias, rationale, notion_url
 
 
 def build_report(db: DatabaseManager, hours: int = DEFAULT_HOURS) -> str:
@@ -27,11 +94,17 @@ def build_report(db: DatabaseManager, hours: int = DEFAULT_HOURS) -> str:
 
     Returns a short markdown-friendly string suitable for Discord message body.
     """
-    now = datetime.utcnow()
+    # Use timezone-aware UTC now to avoid deprecation warnings
+    from datetime import timezone
+
+    now = datetime.now(timezone.utc)
     since = now - timedelta(hours=hours)
     since_sql = since.strftime("%Y-%m-%d %H:%M:%S")
 
     queue_length = db.get_llm_queue_length()
+
+    # Capture premarket summary if available
+    bias, rationale, notion_url = _extract_premarket_summary()
 
     with db._get_connection() as conn:
         cursor = conn.cursor()
@@ -74,8 +147,15 @@ def build_report(db: DatabaseManager, hours: int = DEFAULT_HOURS) -> str:
 
     # Build message
     lines = []
-    lines.append(f"**Gold Standard — LLM Daily Report** (last {hours}h)")
+    lines.append(f"**Syndicate — LLM Daily Report** (last {hours}h)")
     lines.append("")
+
+    if bias:
+        lines.append(f"**Pre-Market Summary:** **{bias}** — {rationale}")
+        if notion_url:
+            lines.append(f"Notion: {notion_url}")
+        lines.append("")
+
     lines.append(f"- **Queue length**: {queue_length}")
     lines.append(f"- **Completed (last {hours}h)**: {completed_cnt}")
     lines.append(f"- **Sanitizer corrections (last {hours}h)**: {corrections_total}")
@@ -106,19 +186,108 @@ def build_report(db: DatabaseManager, hours: int = DEFAULT_HOURS) -> str:
     return "\n".join(lines)
 
 
+def build_structured_report(db: DatabaseManager, hours: int = DEFAULT_HOURS) -> dict:
+    """Build a structured report suitable for embedding in Discord.
+
+    Returns a dict containing top-level metrics and short lists for details.
+    """
+    from datetime import timezone
+
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+    since_sql = since.strftime("%Y-%m-%d %H:%M:%S")
+
+    queue_length = db.get_llm_queue_length()
+
+    bias, rationale, notion_url = _extract_premarket_summary()
+
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT SUM(corrections) as total FROM llm_sanitizer_audit WHERE created_at >= ?",
+            (since_sql,),
+        )
+        corrections_total = int(cursor.fetchone()["total"] or 0)
+
+        cursor.execute(
+            "SELECT COUNT(1) as cnt FROM llm_tasks WHERE status = 'completed' AND completed_at >= ?",
+            (since_sql,),
+        )
+        completed_cnt = int(cursor.fetchone()["cnt"] or 0)
+
+        # Small samples for details
+        cursor.execute(
+            "SELECT id, task_id, corrections, notes, created_at FROM llm_sanitizer_audit WHERE created_at >= ? ORDER BY created_at DESC LIMIT 8",
+            (since_sql,),
+        )
+        recent_audits = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT id, document_path, status, started_at, completed_at FROM llm_tasks WHERE status = 'flagged' AND completed_at >= ? ORDER BY completed_at DESC LIMIT 8",
+            (since_sql,),
+        )
+        flagged_tasks = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT id, document_path, error, attempts, completed_at FROM llm_tasks WHERE error IS NOT NULL AND completed_at >= ? ORDER BY completed_at DESC LIMIT 8",
+            (since_sql,),
+        )
+        errors = [dict(r) for r in cursor.fetchall()]
+
+    return {
+        "generated_at": now.isoformat(),
+        "hours": hours,
+        "queue_length": queue_length,
+        "completed": completed_cnt,
+        "corrections": corrections_total,
+        "premarket": {"bias": bias, "rationale": rationale, "notion_url": notion_url},
+        "recent_audits": recent_audits,
+        "flagged": flagged_tasks,
+        "errors": errors,
+    }
+
+
 def send(hours: int = DEFAULT_HOURS, webhook: Optional[str] = None, dry_run: bool = False) -> bool:
     db = DatabaseManager()
-    msg = build_report(db, hours=hours)
+    structured = build_structured_report(db, hours=hours)
+    embed = discord_templates.build_daily_embed(structured)
+
     if dry_run:
-        print(msg)
+        # Print a simple markdown representation and return
+        print(discord_templates.plain_daily_text(structured))
         return True
 
-    # Attempt to send via Discord webhook
-    ok = send_discord(msg, webhook_url=webhook)
+    # Determine webhook URL: prefer explicit `webhook` arg, otherwise environment
+    webhook_url = webhook or os.getenv("DISCORD_REPORTS_WEBHOOK_URL") or os.getenv("DISCORD_WEBHOOK_URL")
+
+    # Compute a fingerprint for this payload to avoid duplicate sends
+    try:
+        import hashlib, json
+        payload_key = json.dumps(embed, sort_keys=True, default=str)
+        fingerprint = hashlib.sha256(payload_key.encode('utf-8')).hexdigest()
+    except Exception:
+        fingerprint = None
+
+    db = DatabaseManager()
+    if fingerprint and db.was_discord_recent(webhook_url or "default", fingerprint, minutes=30):
+        LOG.info("Skipping duplicate daily report send (recent fingerprint match)")
+        return True
+
+    ok = send_discord(None, webhook_url=webhook_url, embed=embed)
+    if ok and fingerprint:
+        try:
+            db.record_discord_send(webhook_url or "default", fingerprint, hashlib.sha256(payload_key.encode('utf-8')).hexdigest())
+        except Exception:
+            pass
     if not ok:
-        LOG.warning("Failed to send daily report to Discord; falling back to stdout")
-        print(msg)
-    return ok
+        LOG.warning("Failed to send daily report embed to Discord; falling back to plaintext")
+        # Attempt plain-text fallback using existing webhook env
+        plain = build_report(db, hours=hours)
+        fallback_ok = send_discord(plain, webhook_url=os.getenv("DISCORD_WEBHOOK_URL"))
+        if not fallback_ok:
+            print(plain)
+        return fallback_ok
+    return True
 
 
 def main(argv: Optional[list] = None):

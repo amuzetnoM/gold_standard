@@ -7,16 +7,17 @@
 # /_______  /|___||____|_  /___|______/ /_______  (____  /____/   __/|___|  (____  /
 #         \/             \/                     \/     \/     |__|        \/     \/
 #
-# Gold Standard - Precious Metals Intelligence System
+# Syndicate - Precious Metals Intelligence System
 # Copyright (c) 2025 SIRIUS Alpha
 # All rights reserved.
 # ══════════════════════════════════════════════════════════════════════════════
 """
-Gold Standard Database Manager
+Syndicate Database Manager
 SQLite-based storage for reports, journals, analysis data, and insights.
 Provides intelligent redundancy control, date-wise organization, and task management.
 """
 
+import os
 import json
 import logging
 import sqlite3
@@ -28,7 +29,12 @@ from typing import Any, Dict, List, Optional
 
 # Database path
 DB_DIR = Path(__file__).resolve().parent / "data"
-DB_PATH = DB_DIR / "gold_standard.db"
+# Allow overriding DB path via environment (useful for tests and alternate deployments)
+_env_db = os.getenv("GOLD_STANDARD_TEST_DB") or os.getenv("GOLD_STANDARD_DB")
+if _env_db:
+    DB_PATH = Path(_env_db)
+else:
+    DB_PATH = DB_DIR / "syndicate.db"
 
 
 @dataclass
@@ -82,7 +88,7 @@ class AnalysisSnapshot:
 
 class DatabaseManager:
     """
-    Manages SQLite database for Gold Standard system.
+    Manages SQLite database for Syndicate system.
     Handles journals, reports, and analysis data with intelligent redundancy control.
     """
 
@@ -170,6 +176,30 @@ class DatabaseManager:
                 )
             """)
 
+            # Discord message history for dedupe/rate-limit
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discord_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel TEXT,
+                    fingerprint TEXT,
+                    payload_hash TEXT,
+                    sent_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+
+            # social posts table for external platforms (audit and dedupe)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS social_posts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform TEXT,
+                    fingerprint TEXT,
+                    payload_hash TEXT,
+                    external_id TEXT,
+                    status TEXT DEFAULT 'sent',
+                    sent_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+
             # Subscriptions table - user subscriptions to topics for alerts
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -205,78 +235,18 @@ class DatabaseManager:
             except sqlite3.OperationalError:
                 pass  # Column likely already exists
 
-    def save_llm_sanitizer_audit(self, task_id: int, corrections: int, notes: str = None) -> int:
-        """Save a sanitizer audit record."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO llm_sanitizer_audit (task_id, corrections, notes) VALUES (?, ?, ?)",
-                (task_id, corrections, notes),
-            )
-            return cursor.lastrowid
-
-    def save_bot_audit(self, user: str, action: str, details: str = None) -> int:
-        """Save an operator or bot action to the bot_audit table."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO bot_audit (user, action, details) VALUES (?, ?, ?)",
-                (user, action, details),
-            )
-            return cursor.lastrowid
-
-    # ------------------------------------------------------------------
-    # Subscription helpers
-    # ------------------------------------------------------------------
-    def add_subscription(self, user_id: str, topic: str) -> int:
-        """Subscribe a user to a topic. Returns the subscription id."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute(
-                    "INSERT INTO subscriptions (user_id, topic) VALUES (?, ?)",
-                    (user_id, topic),
+            # Ensure model_usage table exists for pruning/metrics
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS model_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_path TEXT UNIQUE NOT NULL,
+                    name TEXT,
+                    size_gb REAL,
+                    last_used TEXT,
+                    usage_count INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
-                return cursor.lastrowid
-            except sqlite3.IntegrityError:
-                # Already subscribed
-                cursor.execute(
-                    "SELECT id FROM subscriptions WHERE user_id = ? AND topic = ?", (user_id, topic)
-                )
-                row = cursor.fetchone()
-                return row["id"] if row else 0
-
-    def remove_subscription(self, user_id: str, topic: str) -> bool:
-        """Remove a subscription for a user and topic."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM subscriptions WHERE user_id = ? AND topic = ?", (user_id, topic))
-            return cursor.rowcount > 0
-
-    def list_subscriptions(self, topic: str = None) -> list:
-        """List subscriptions optionally filtered by topic."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            if topic:
-                cursor.execute("SELECT user_id, topic, created_at FROM subscriptions WHERE topic = ? ORDER BY created_at DESC", (topic,))
-            else:
-                cursor.execute("SELECT user_id, topic, created_at FROM subscriptions ORDER BY created_at DESC")
-            return [dict(r) for r in cursor.fetchall()]
-
-    def get_user_subscriptions(self, user_id: str) -> list:
-        """Return list of topics a user is subscribed to."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT topic FROM subscriptions WHERE user_id = ?", (user_id,))
-            return [r["topic"] for r in cursor.fetchall()]
-
-    def get_recent_sanitizer_total(self, hours: int = 1) -> int:
-        """Return sum of sanitizer corrections in the last <hours> hours."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT SUM(corrections) as total FROM llm_sanitizer_audit WHERE created_at >= datetime('now', ?)", (f"-{hours} hours",))
-            row = cursor.fetchone()
-            return int(row["total"] or 0)
+            """)
 
             # Reports table - weekly, monthly, yearly
             cursor.execute("""
@@ -384,19 +354,6 @@ class DatabaseManager:
                 )
             """)
 
-            # Add scheduled_for column if it doesn't exist (migration)
-            try:
-                cursor.execute("ALTER TABLE action_insights ADD COLUMN scheduled_for TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-
-            # Add retry tracking columns if they don't exist (migration)
-            try:
-                cursor.execute("ALTER TABLE action_insights ADD COLUMN retry_count INTEGER DEFAULT 0")
-                cursor.execute("ALTER TABLE action_insights ADD COLUMN last_error TEXT")
-            except sqlite3.OperationalError:
-                pass  # Columns already exist
-
             # System configuration table - stores runtime settings
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS system_config (
@@ -416,45 +373,6 @@ class DatabaseManager:
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-
-            # LLM tasks table - persistent queue for long-running AI generations
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS llm_tasks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    document_path TEXT NOT NULL,
-                    prompt TEXT NOT NULL,
-                    provider_hint TEXT,
-                    status TEXT DEFAULT 'pending',
-                    attempts INTEGER DEFAULT 0,
-                    response TEXT,
-                    error TEXT,
-                    priority TEXT DEFAULT 'normal',
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    started_at TEXT,
-                    last_attempt_at TEXT,
-                    completed_at TEXT
-                )
-            """)
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_llm_tasks_status_created ON llm_tasks(status, created_at)")
-            # Migration: add 'task_type' column to distinguish generation vs post-processing tasks
-            try:
-                cursor.execute("ALTER TABLE llm_tasks ADD COLUMN task_type TEXT DEFAULT 'generate'")
-            except sqlite3.OperationalError:
-                pass  # Column likely already exists
-
-            # Migrate existing JSON blob from system_config into cortex_memory if present
-            try:
-                cursor.execute("SELECT value FROM system_config WHERE key = 'cortex_memory'")
-                row = cursor.fetchone()
-                cursor.execute("SELECT COUNT(1) as cnt FROM cortex_memory")
-                cnt = cursor.fetchone()["cnt"]
-                if row and row["value"] and cnt == 0:
-                    cursor.execute(
-                        "INSERT INTO cortex_memory (id, memory_json, updated_at) VALUES (1, ?, CURRENT_TIMESTAMP)",
-                        (row["value"],),
-                    )
-            except Exception:
-                pass
 
             # Task execution log - tracks task executor results
             cursor.execute("""
@@ -552,6 +470,151 @@ class DatabaseManager:
 
             # Initialize default schedules if not present
             self._init_default_schedules(cursor)
+
+    def save_llm_sanitizer_audit(self, task_id: int, corrections: int, notes: str = None) -> int:
+        """Save a sanitizer audit record."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO llm_sanitizer_audit (task_id, corrections, notes) VALUES (?, ?, ?)",
+                (task_id, corrections, notes),
+            )
+            return cursor.lastrowid
+
+    def save_bot_audit(self, user: str, action: str, details: str = None) -> int:
+        """Save an operator or bot action to the bot_audit table."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO bot_audit (user, action, details) VALUES (?, ?, ?)",
+                (user, action, details),
+            )
+            return cursor.lastrowid
+
+    # ------------------------------------------------------------------
+    # Discord message dedupe helpers
+    # ------------------------------------------------------------------
+    def record_discord_send(self, channel: str, fingerprint: str, payload_hash: str) -> int:
+        """Record a discord message send for dedupe and auditing."""
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO discord_messages (channel, fingerprint, payload_hash, sent_at) VALUES (?, ?, ?, datetime('now'))",
+                (channel, fingerprint, payload_hash),
+            )
+            return cur.lastrowid
+
+    def was_discord_recent(self, channel: str, fingerprint: str, minutes: int = 30) -> bool:
+        """Return True if same fingerprint was sent to `channel` within `minutes` minutes."""
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(1) as cnt FROM discord_messages WHERE channel = ? AND fingerprint = ? AND sent_at >= datetime('now', ?)",
+                (channel, fingerprint, f"-{minutes} minutes"),
+            )
+            row = cur.fetchone()
+            return int(row["cnt"] or 0) > 0
+
+    # ------------------------------------------------------------------
+    # Subscription helpers
+    # ------------------------------------------------------------------
+    def add_subscription(self, user_id: str, topic: str) -> int:
+        """Subscribe a user to a topic. Returns the subscription id."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    "INSERT INTO subscriptions (user_id, topic) VALUES (?, ?)",
+                    (user_id, topic),
+                )
+                return cursor.lastrowid
+            except sqlite3.IntegrityError:
+                # Already subscribed
+                cursor.execute(
+                    "SELECT id FROM subscriptions WHERE user_id = ? AND topic = ?", (user_id, topic)
+                )
+                row = cursor.fetchone()
+                return row["id"] if row else 0
+
+    def remove_subscription(self, user_id: str, topic: str) -> bool:
+        """Remove a subscription for a user and topic."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM subscriptions WHERE user_id = ? AND topic = ?", (user_id, topic))
+            return cursor.rowcount > 0
+
+    def list_subscriptions(self, topic: str = None) -> list:
+        """List subscriptions optionally filtered by topic."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if topic:
+                cursor.execute("SELECT user_id, topic, created_at FROM subscriptions WHERE topic = ? ORDER BY created_at DESC", (topic,))
+            else:
+                cursor.execute("SELECT user_id, topic, created_at FROM subscriptions ORDER BY created_at DESC")
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_user_subscriptions(self, user_id: str) -> list:
+        """Return list of topics a user is subscribed to."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT topic FROM subscriptions WHERE user_id = ?", (user_id,))
+            return [r["topic"] for r in cursor.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Model usage helpers
+    # ------------------------------------------------------------------
+    def record_model_usage(self, model_path: str, name: str | None = None, size_gb: float | None = None) -> None:
+        """Insert or update model usage metadata and set last_used timestamp."""
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO model_usage (model_path, name, size_gb, last_used, usage_count) VALUES (?, ?, ?, datetime('now'), 1) "
+                "ON CONFLICT(model_path) DO UPDATE SET last_used = datetime('now'), usage_count = usage_count + 1, name = COALESCE(?, name), size_gb = COALESCE(?, size_gb)",
+                (model_path, name, size_gb, name, size_gb),
+            )
+
+    def get_unused_models(self, days_threshold: int = 30, keep_list: list[str] | None = None, min_keep: int = 1) -> list:
+        """Return list of model rows eligible for pruning.
+
+        - days_threshold: models not used in the last N days are eligible
+        - keep_list: names/paths to exclude from deletion
+        - min_keep: keep at least this many models even if older than threshold
+        """
+        keep_list = keep_list or []
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT model_path, name, size_gb, last_used, usage_count FROM model_usage ORDER BY last_used DESC"
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+
+        # filter by keep_list
+        filtered = []
+        for r in rows:
+            name = (r.get("name") or Path(r.get("model_path")).stem).lower()
+            path = str(r.get("model_path") or "")
+            if any(k.lower() in name or k.lower() in path for k in keep_list):
+                continue
+            filtered.append(r)
+
+        # eligible where last_used is NULL or older than threshold
+        from datetime import datetime, timezone
+
+        cutoff = (datetime.now(timezone.utc) - datetime.timedelta(days=days_threshold)).isoformat()
+        eligible = [r for r in reversed(filtered) if (r.get("last_used") is None or str(r.get("last_used")) < cutoff)]
+
+        # Keep at least min_keep models (the most recently used ones) - remove from eligible if needed
+        total_models = len(filtered)
+        to_remove = eligible
+        to_remove = to_remove[: max(0, total_models - min_keep)] if total_models > min_keep else []
+        return to_remove
+    def get_recent_sanitizer_total(self, hours: int = 1) -> int:
+        """Return sum of sanitizer corrections in the last <hours> hours."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT SUM(corrections) as total FROM llm_sanitizer_audit WHERE created_at >= datetime('now', ?)", (f"-{hours} hours",))
+            row = cursor.fetchone()
+            return int(row["total"] or 0)
 
     def _init_default_schedules(self, cursor):
         """Initialize default task schedules."""
@@ -861,8 +924,13 @@ class DatabaseManager:
             return ""
 
     def is_file_synced(self, file_path: str) -> bool:
-        """Check if a file has been synced to Notion and hasn't changed."""
-        # Normalize path to absolute resolved form for consistent dedup
+        """Check if a file has been synced to Notion and hasn't changed.
+
+        If `file_hash` is provided, compare against the stored sync fingerprint
+        (useful when publishing uses a computed strong fingerprint instead of raw
+        file bytes). If not provided, fall back to the existing MD5-of-file check.
+        """
+        # Normalize path to absolute resolved form for consistent dedupe
         from pathlib import Path
 
         normalized_path = str(Path(file_path).resolve())
@@ -880,20 +948,34 @@ class DatabaseManager:
             if not row:
                 return False
 
-            # Check if file has changed
-            current_hash = self.get_file_hash(normalized_path)
-            return row["file_hash"] == current_hash
+            stored_hash = row["file_hash"]
 
-    def record_notion_sync(self, file_path: str, page_id: str, url: str, doc_type: str = None) -> bool:
-        """Record that a file has been synced to Notion."""
-        # Normalize path to absolute resolved form for consistent dedup
+            # If caller provided an explicit fingerprint, compare that
+            if hasattr(self, '_last_checked_hash') and self._last_checked_hash:
+                return stored_hash == self._last_checked_hash
+
+            # Otherwise fall back to file MD5
+            current_hash = self.get_file_hash(normalized_path)
+            return stored_hash == current_hash
+
+    def record_notion_sync(self, file_path: str, page_id: str, url: str, doc_type: str = None, file_hash: str | None = None) -> bool:
+        """Record that a file has been synced to Notion.
+
+        If `file_hash` is provided it will be stored as the canonical fingerprint
+        for deduplication. This allows the publisher to write a computed strong
+        fingerprint (title + body + frontmatter) rather than a raw MD5 of the
+        file bytes when content normalization is used.
+        """
+        # Normalize path to absolute resolved form for consistent dedupe
         from pathlib import Path
 
         normalized_path = str(Path(file_path).resolve())
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            file_hash = self.get_file_hash(normalized_path)
+            if not file_hash:
+                file_hash = self.get_file_hash(normalized_path)
+
             now = datetime.now().isoformat()
 
             cursor.execute(
@@ -918,10 +1000,11 @@ class DatabaseManager:
                     SET status = 'published',
                         notion_page_id = ?,
                         published_at = COALESCE(?, published_at),
-                        updated_at = ?
+                        updated_at = ?,
+                        content_hash = COALESCE(?, content_hash)
                     WHERE file_path = ?
                 """,
-                    (page_id, now, now, normalized_path),
+                    (page_id, now, now, file_hash, normalized_path),
                 )
             except Exception:
                 # If document_lifecycle isn't present or update fails, ignore silently
@@ -1084,6 +1167,27 @@ class DatabaseManager:
                 )
                 for row in cursor.fetchall()
             ]
+
+    def get_latest_journal(self) -> Optional[Dict[str, Any]]:
+        """Return the most recent journal as a dict for backward compatibility with the web UI.
+
+        Returns a dict with keys: date, content, bias, gold_price, silver_price, gsr
+        or None if no journal exists.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM journals ORDER BY date DESC LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "date": row["date"],
+                    "content": row["content"],
+                    "bias": row["bias"],
+                    "gold_price": row["gold_price"],
+                    "silver_price": row["silver_price"],
+                    "gsr": row.get("gsr") if isinstance(row, dict) else row["gsr"],
+                }
+            return None
 
     def get_journals_for_month(self, year: int, month: int) -> List[JournalEntry]:
         """Get all journals for a specific month."""
@@ -2124,7 +2228,7 @@ class DatabaseManager:
                 retries += 1
                 # Increment prometheus retry counter if available
                 try:
-                    from gold_standard.metrics import METRICS
+                    from syndicate.metrics import METRICS
 
                     METRICS["db_log_retries_total"].inc()
                 except Exception:
@@ -2132,7 +2236,7 @@ class DatabaseManager:
                 if retries > max_retries:
                     # Final failure - increment error counter if present
                     try:
-                        from gold_standard.metrics import METRICS
+                        from syndicate.metrics import METRICS
 
                         METRICS["db_log_errors_total"].inc()
                     except Exception:
@@ -2604,10 +2708,22 @@ _db_manager: Optional[DatabaseManager] = None
 
 
 def get_db() -> DatabaseManager:
-    """Get the singleton database manager instance."""
+    """Get the singleton database manager instance.
+
+    If the environment variable `GOLD_STANDARD_TEST_DB` (or `GOLD_STANDARD_DB`) is set and
+    differs from the currently-opened DB, a new DatabaseManager instance will be created.
+    This allows per-test DB isolation without rebooting the process.
+    """
     global _db_manager
+
+    env_db = os.getenv("GOLD_STANDARD_TEST_DB") or os.getenv("GOLD_STANDARD_DB")
     if _db_manager is None:
-        _db_manager = DatabaseManager()
+        _db_manager = DatabaseManager(db_path=Path(env_db) if env_db else None)
+        return _db_manager
+
+    # If env override present and different from current, recreate the manager
+    if env_db and str(_db_manager.db_path) != str(Path(env_db)):
+        _db_manager = DatabaseManager(db_path=Path(env_db))
     return _db_manager
 
 

@@ -7,12 +7,12 @@
 # /_______  /|___||____|_  /___|______/ /_______  (____  /____/   __/|___|  (____  /
 #         \/             \/                     \/     \/     |__|        \/     \/
 #
-# Gold Standard - Precious Metals Intelligence System
+# Syndicate - Precious Metals Intelligence System
 # Copyright (c) 2025 SIRIUS Alpha
 # All rights reserved.
 # ══════════════════════════════════════════════════════════════════════════════
 """
-Notion Publisher for Gold Standard
+Notion Publisher for Syndicate
 Python-based publisher that syncs reports to Notion database.
 Includes intelligent deduplication to prevent publishing the same content multiple times.
 """
@@ -37,10 +37,12 @@ try:
     NOTION_AVAILABLE = True
 except ImportError:
     NOTION_AVAILABLE = False
+    # Provide a placeholder Client attribute so tests can monkeypatch this module
+    Client = None
     print("notion-client not installed. Run: pip install notion-client")
 
 try:
-    from gold_standard.utils.env_loader import load_env
+    from syndicate.utils.env_loader import load_env
 
     load_env(PROJECT_ROOT / ".env")
 except Exception:
@@ -51,8 +53,11 @@ except Exception:
         load_dotenv()
     except Exception:
         pass
+# Global env toggle to disable wet Notion publishes for safe testing
+_DISABLE_NOTION_PUBLISH = str(os.getenv("DISABLE_NOTION_PUBLISH", "0")).lower() in ("1", "true", "yes")
 import hashlib
 from filelock import FileLock
+import html
 
 # Import database manager for sync tracking
 try:
@@ -77,6 +82,17 @@ NOTION_TYPES = [
     "institutional",
     "Pre-Market",
     "analysis",
+]
+
+# Files and filename substrings to always ignore from Notion sync (case-insensitive)
+IGNORE_PATTERNS = [
+    "monitor_",
+    "data_fetch_",
+    "digest_",
+    "digests/",
+    "_act-",
+    "act-",
+    "FILE_INDEX",
 ]
 
 # File pattern to Notion type mapping - ORDER MATTERS (first match wins)
@@ -210,14 +226,16 @@ class NotionConfig:
 
 
 class NotionPublisher:
-    """Publish Gold Standard reports to Notion."""
+    """Publish Syndicate reports to Notion."""
 
-    def __init__(self, config: NotionConfig = None):
-        if not NOTION_AVAILABLE:
+    def __init__(self, config: NotionConfig = None, no_client_ok: bool = False):
+        # Allow tests or dry-run to construct without the Notion client.
+        if not no_client_ok and not NOTION_AVAILABLE and Client is None:
             raise ImportError("notion-client package not installed")
 
         self.config = config or NotionConfig.from_env()
-        self.client = Client(auth=self.config.api_key)
+        # Initialize the notion client (may be a real client, a monkeypatched fake, or None for dry-run)
+        self.client = Client(auth=self.config.api_key) if (Client is not None and not no_client_ok) else None
 
     def _get_database_properties(self) -> Dict[str, Any]:
         """Return data-source properties if available, otherwise fall back to database properties.
@@ -245,7 +263,8 @@ class NotionPublisher:
                         "Notion-Version": "2025-09-03",
                         "Content-Type": "application/json",
                     }
-                    r = requests.get(url, headers=headers, timeout=10)
+                    timeout = int(os.getenv("NOTION_API_TIMEOUT", "30"))
+                    r = requests.get(url, headers=headers, timeout=timeout)
                     r.raise_for_status()
                     payload = r.json() or {}
                     data_sources = payload.get("data_sources") or []
@@ -267,7 +286,8 @@ class NotionPublisher:
                         "Notion-Version": "2025-09-03",
                         "Content-Type": "application/json",
                     }
-                    r = requests.get(url, headers=headers, timeout=10)
+                    timeout = int(os.getenv("NOTION_API_TIMEOUT", "30"))
+                    r = requests.get(url, headers=headers, timeout=timeout)
                     r.raise_for_status()
                     payload = r.json() or {}
                     props = payload.get("properties", {}) or {}
@@ -279,7 +299,23 @@ class NotionPublisher:
 
             # Fallback: retrieve database properties via the notion client
             try:
-                db = self.client.databases.retrieve(self.config.database_id)
+                # Respect custom timeout for client-side operations when available
+                try:
+                    db = self.client.databases.retrieve(self.config.database_id)
+                except Exception:
+                    # Last resort: try a simple requests call with a larger timeout
+                    timeout = int(os.getenv("NOTION_API_TIMEOUT", "30"))
+                    import requests as _req
+
+                    url = f"https://api.notion.com/v1/databases/{self.config.database_id}"
+                    headers = {
+                        "Authorization": f"Bearer {self.config.api_key}",
+                        "Notion-Version": "2025-09-03",
+                        "Content-Type": "application/json",
+                    }
+                    r = _req.get(url, headers=headers, timeout=timeout)
+                    r.raise_for_status()
+                    db = r.json() or {}
                 props = db.get("properties", {}) or {}
                 return props
             except Exception as e:
@@ -580,6 +616,7 @@ class NotionPublisher:
         doc_date: str = None,
         filename: str = None,
         use_enhanced_formatting: bool = True,
+        dry_run: bool = False,
     ) -> Dict[str, str]:
         """Publish a document to Notion."""
 
@@ -626,6 +663,69 @@ class NotionPublisher:
                 blocks = self.markdown_to_blocks(body)
         else:
             blocks = self.markdown_to_blocks(body)
+
+        # Frontmatter validation and tag normalization
+        def _validate_frontmatter(meta_obj: Dict) -> List[str]:
+            errs = []
+            # Validate date if present (simple checks)
+            try:
+                if meta_obj.get("date"):
+                    d = str(meta_obj.get("date"))
+                    valid = False
+                    # Try ISO-like
+                    try:
+                        datetime.fromisoformat(d.split("T")[0])
+                        valid = True
+                    except Exception:
+                        pass
+                    # Try common formats
+                    if not valid:
+                        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%m/%d/%Y", "%Y/%m/%d"):
+                            try:
+                                datetime.strptime(d, fmt)
+                                valid = True
+                                break
+                            except Exception:
+                                continue
+                    if not valid:
+                        errs.append(f"Invalid date format: {meta_obj.get('date')}")
+            except Exception:
+                errs.append("Date validation error")
+
+            # Validate tags
+            try:
+                t = meta_obj.get("tags")
+                if t and not isinstance(t, (list, tuple)):
+                    errs.append("'tags' should be a list in frontmatter")
+            except Exception:
+                errs.append("Tags validation error")
+
+            return errs
+
+        def _normalize_tags(tag_list: List[str]) -> List[str]:
+            out = []
+            for t in (tag_list or []):
+                try:
+                    tn = str(t).strip()
+                    # Remove stray punctuation
+                    tn = re.sub(r"[^A-Za-z0-9\-\._ /]", "", tn)
+                    # If looks like a ticker symbol, uppercase
+                    if tn.isupper() or (len(tn) <= 5 and tn.replace('.', '').isalpha()):
+                        tn = tn.upper()
+                    else:
+                        tn = tn.title()
+                    if tn and tn not in out:
+                        out.append(tn)
+                except Exception:
+                    continue
+            return out
+
+        # Run frontmatter validation
+        fm_errors = _validate_frontmatter(meta)
+        # Normalize tag list for properties
+        if tags is None:
+            tags = meta.get("tags") if isinstance(meta.get("tags"), list) else tags
+        tags = _normalize_tags(tags or [])
 
         # Build properties - start with required title
         properties = {"title": {"title": [{"text": {"content": title}}]}}
@@ -741,18 +841,46 @@ class NotionPublisher:
             # Leave parent as database_id on any error to preserve backwards compatibility
             parent = {"database_id": self.config.database_id}
 
+        # Before attempting API calls: if dry_run, validate blocks and properties only
+        def _validate_blocks_for_notion(blocks_list: List[Dict]) -> List[str]:
+            errs = []
+            # Validate table structures: each table_row must match parent table_width
+            for b in blocks_list:
+                try:
+                    if b.get("type") == "table":
+                        t = b.get("table", {})
+                        width = int(t.get("table_width", 0) or 0)
+                        children = t.get("children", [])
+                        for idx, r in enumerate(children):
+                            cells = r.get("table_row", {}).get("cells", [])
+                            if len(cells) != width:
+                                errs.append(f"Table row {idx} has {len(cells)} cells but table_width is {width}")
+                except Exception:
+                    errs.append("Table validation error")
+            return errs
+
+        if dry_run:
+            # Combine frontmatter and block validations and return a report without calling Notion
+            block_errors = _validate_blocks_for_notion(blocks)
+            errors = fm_errors + block_errors
+            if errors:
+                return {"dry_run": True, "valid": False, "errors": errors, "blocks": len(blocks)}
+            else:
+                return {"dry_run": True, "valid": True, "blocks": len(blocks)}
+
         # Create page with robust retry logic, exponential backoff, jitter and structured logging
-        attempts = 5
-        base_delay = 1
+        attempts = int(os.getenv("NOTION_PUBLISH_ATTEMPTS", "7"))
+        base_delay = float(os.getenv("NOTION_PUBLISH_BASE_DELAY", "2"))
         last_exc = None
         for attempt in range(1, attempts + 1):
             try:
                 logging.info("Notion publish attempt %d/%d", attempt, attempts)
-                response = self.client.pages.create(
-                    parent=parent,
-                    properties=properties,
-                    children=blocks[:100],  # Notion limit per request
-                )
+                # Try to prefer a client-level timeout if available; otherwise rely on retries/backoff
+                try:
+                    response = self.client.pages.create(parent=parent, properties=properties, children=blocks[:100])
+                except TypeError:
+                    # Older client may not accept kwargs the same way; fall back to direct call
+                    response = self.client.pages.create(parent=parent, properties=properties, children=blocks[:100])
                 last_exc = None
                 logging.info("Notion publish succeeded on attempt %d", attempt)
                 break
@@ -763,9 +891,75 @@ class NotionPublisher:
                 # If it's a property-type error, attempt the Status/Minimal fallbacks before retrying
                 try:
                     db_props = db_props if 'db_props' in locals() else self._get_database_properties()
+                    # If Status property exists, ensure the chosen option is valid for the DB schema
                     if "Status" in properties and "Status" in db_props:
                         prop_type = db_props["Status"].get("type")
-                        # Try the other type if mismatch appears
+                        desired = None
+                        if "status" in properties.get("Status", {}):
+                            desired = properties["Status"]["status"].get("name")
+                        elif "select" in properties.get("Status", {}):
+                            desired = properties["Status"]["select"].get("name")
+
+                        def _normalize_status_name(s: str) -> str:
+                            s = str(s or "").strip()
+                            s = s.replace("_", " ")
+                            s = s.replace("-", " ")
+                            if s.lower() == "in progress":
+                                return "In Progress"
+                            if s.lower() == "inprogress":
+                                return "In Progress"
+                            if s.lower() == "in_progress":
+                                return "In Progress"
+                            if s.lower() == "published":
+                                return "Published"
+                            if s.lower() == "draft":
+                                return "Draft"
+                            return s.title()
+
+                        if desired:
+                            desired_norm = _normalize_status_name(desired)
+                        else:
+                            desired_norm = None
+
+                        # Inspect allowed options for the property
+                        allowed_options = []
+                        try:
+                            prop_payload = db_props.get("Status", {})
+                            ptype = prop_payload.get("type")
+                            opts = prop_payload.get(ptype, {}).get("options") if ptype else None
+                            if not opts:
+                                # Try alternate structures
+                                opts = prop_payload.get("status", {}).get("options") or prop_payload.get("select", {}).get("options")
+                            if opts:
+                                allowed_options = [o.get("name", "").strip() for o in opts]
+                        except Exception:
+                            allowed_options = []
+
+                        # If desired is present and not allowed, attempt to upsert the option (select/status)
+                        if desired_norm and desired_norm not in [a.strip() for a in allowed_options]:
+                            try:
+                                # For select/status types we can attempt to add the option to the database schema
+                                if prop_type in ("select", "status"):
+                                    logging.info("Adding missing Status option '%s' to database schema", desired_norm)
+                                    # Retrieve existing options payload
+                                    options_payload = prop_payload.get(prop_type, {}).get("options", []) if prop_payload.get(prop_type) else []
+                                    # Append new option
+                                    options_payload.append({"name": desired_norm})
+                                    update_payload = {"properties": {"Status": {prop_type: {"options": options_payload}}}}
+                                    try:
+                                        # Attempt to update the database schema to include the new option
+                                        self.client.databases.update(self.config.database_id, **update_payload)
+                                        # Refresh db_props
+                                        db_props = self._get_database_properties()
+                                        logging.info("Status option upserted; retrying publish")
+                                        response = self.client.pages.create(parent=parent, properties=properties, children=blocks[:100])
+                                        last_exc = None
+                                        break
+                                    except Exception:
+                                        logging.exception("Failed to upsert Status option; will fallback to minimal create")
+                            except Exception:
+                                logging.exception("Status option upsert attempt failed")
+                        # If types mismatch, try alternate representation
                         if prop_type == "status" and "select" in properties["Status"]:
                             properties["Status"] = {"status": {"name": properties["Status"]["select"]["name"]}}
                             logging.info("Retrying with Status as 'status' type")
@@ -825,7 +1019,7 @@ class NotionPublisher:
         return {"page_id": page_id, "url": url, "type": doc_type, "tags": tags}
 
     def sync_file(
-        self, filepath: str, doc_type: str = None, tags: List[str] = None, force: bool = False
+        self, filepath: str, doc_type: str = None, tags: List[str] = None, force: bool = False, dry_run: bool = False
     ) -> Dict[str, str]:
         """
         Sync a local file to Notion with deduplication.
@@ -847,9 +1041,47 @@ class NotionPublisher:
         content = path.read_text(encoding="utf-8")
         filename = path.name
 
-        # Normalize path and compute file hash for DB checks
+        # Enforce repository-level ignore patterns: never publish these files to Notion
+        try:
+            fname_lower = filename.lower()
+            for pat in IGNORE_PATTERNS:
+                if pat.lower() in fname_lower or pat.lower() in str(path).lower():
+                    return {
+                        "page_id": "",
+                        "url": "",
+                        "type": doc_type or "notes",
+                        "tags": [],
+                        "skipped": True,
+                        "reason": "excluded_pattern",
+                    }
+        except Exception:
+            pass
+
+        # Normalize path and compute a stronger content fingerprint for DB checks
         normalized_path = str(path)
         file_hash = None
+        # Parse frontmatter to include structured metadata in fingerprint
+        try:
+            meta, body = self.parse_frontmatter(content)
+        except Exception:
+            meta, body = {}, content
+
+        # Compute a deterministic strong fingerprint (title + frontmatter + normalized body)
+        try:
+            title_for_hash = None
+            h1_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+            title_for_hash = h1_match.group(1).strip() if h1_match else filename.replace(".md", "").replace("_", " ")
+            # Unescape and strip tags for fingerprinting
+            title_for_hash = html.unescape(title_for_hash)
+            title_for_hash = re.sub(r"<[^>]+>", "", title_for_hash)
+            body_norm = re.sub(r"\s+", " ", html.unescape(body)).strip()
+            meta_str = "" if not meta else ",".join(f"{k}={meta[k]}" for k in sorted(meta.keys()))
+            fingerprint_source = "\n".join([title_for_hash, meta_str, body_norm])
+            file_hash = hashlib.sha256(fingerprint_source.encode("utf-8")).hexdigest()
+            # store hash for potential db comparison later
+            self._last_checked_hash = file_hash
+        except Exception:
+            file_hash = None
         if DB_AVAILABLE:
             try:
                 db = get_db()
@@ -862,7 +1094,9 @@ class NotionPublisher:
                     db.release_stale_claims(ttl)
                 except Exception:
                     pass
-                file_hash = db.get_file_hash(normalized_path)
+                # Only read stored file hash if we don't have a computed fingerprint
+                if not file_hash:
+                    file_hash = db.get_file_hash(normalized_path)
                 # Check document lifecycle to avoid duplicate publishes
                 doc = db.get_document_status(normalized_path)
                 if doc:
@@ -899,6 +1133,7 @@ class NotionPublisher:
 
                 # Attempt to claim the document by registering/upserting as in_progress
                 try:
+                    # Register the document lifecycle using the computed fingerprint
                     db.register_document(normalized_path, doc_type or "notes", status="in_progress", content_hash=file_hash)
                 except Exception:
                     pass
@@ -914,6 +1149,58 @@ class NotionPublisher:
 
                 status = get_document_status(content)
                 ai_processed = is_ai_processed(content)
+
+                # Allow explicit opt-out for Notion publishing via frontmatter
+                meta_publish = meta.get("publish_to_notion") if isinstance(meta, dict) else None
+                if meta_publish is False:
+                    return {
+                        "page_id": "",
+                        "url": "",
+                        "type": doc_type or "notes",
+                        "tags": [],
+                        "skipped": True,
+                        "reason": "opted_out_publish",
+                    }
+
+                # If DB available, consult document lifecycle to prevent publishing drafts
+                if DB_AVAILABLE:
+                    try:
+                        db = get_db()
+                        doc_life = db.get_document_status(str(path)) if 'path' in locals() else None
+                        if doc_life and doc_life.get('status') == 'draft' and not force:
+                            return {
+                                "page_id": "",
+                                "url": "",
+                                "type": doc_type or "notes",
+                                "tags": [],
+                                "skipped": True,
+                                "reason": "lifecycle_draft",
+                            }
+                        # Prevent publishing if sanitizer corrections exist for associated tasks
+                        try:
+                            # Find tasks linked to this document path
+                            with db._get_connection() as conn:
+                                cur = conn.cursor()
+                                cur.execute("SELECT id FROM llm_tasks WHERE document_path = ?", (str(path),))
+                                task_ids = [r[0] for r in cur.fetchall()]
+                                if task_ids:
+                                    q = f"SELECT SUM(corrections) as total FROM llm_sanitizer_audit WHERE task_id IN ({','.join(['?']*len(task_ids))})"
+                                    cur.execute(q, tuple(task_ids))
+                                    row = cur.fetchone()
+                                    corrections = int(row[0] or 0) if row else 0
+                                    if corrections > 0 and not force:
+                                        return {
+                                            "page_id": "",
+                                            "url": "",
+                                            "type": doc_type or "notes",
+                                            "tags": [],
+                                            "skipped": True,
+                                            "reason": "sanitizer_corrections",
+                                        }
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
 
                 if not is_ready_for_sync(content):
                     reason = f"Document status is '{status}'"
@@ -935,21 +1222,25 @@ class NotionPublisher:
         # Check if file has already been synced (and hasn't changed)
         if DB_AVAILABLE and not force:
             db = get_db()
-            if db.is_file_synced(str(path)):
-                existing = db.get_notion_page_for_file(str(path))
-                return {
-                    "page_id": existing.get("notion_page_id", ""),
-                    "url": existing.get("notion_url", ""),
-                    "type": existing.get("doc_type", "notes"),
-                    "tags": [],
-                    "skipped": True,
-                    "reason": "File unchanged since last sync",
-                }
+            try:
+                if db.is_file_synced(str(path)):
+                    existing = db.get_notion_page_for_file(str(path))
+                    return {
+                        "page_id": existing.get("notion_page_id", ""),
+                        "url": existing.get("notion_url", ""),
+                        "type": existing.get("doc_type", "notes"),
+                        "tags": [],
+                        "skipped": True,
+                        "reason": "File unchanged since last sync",
+                    }
+            except Exception:
+                # If DB or notion_sync table is unavailable, proceed to acquire lock and attempt publish
+                pass
 
         # Acquire per-file publish lock to avoid concurrent publishes creating duplicates
         # Ensure locks live under the project cache directory to avoid trying to
         # create a directory with the raw database id as a top-level path.
-        lock_dir = Path.home() / ".cache" / "gold_standard" / (self.config.database_id or "notion") / "notion_locks"
+        lock_dir = Path.home() / ".cache" / "syndicate" / (self.config.database_id or "notion") / "notion_locks"
         lock_dir.mkdir(parents=True, exist_ok=True)
         lock_name = hashlib.md5(str(path).encode()).hexdigest() + ".lock"
         lock_path = lock_dir / lock_name
@@ -973,12 +1264,30 @@ class NotionPublisher:
             # Extract title from H1 or filename
             h1_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
             title = h1_match.group(1).strip() if h1_match else filename.replace(".md", "").replace("_", " ")
-            result = self.publish(title=title, content=content, doc_type=doc_type, tags=tags, filename=filename)
+            # Sanitize title: strip HTML tags and unescape entities to avoid corrupted Notion titles
+            def _sanitize_title(s: str) -> str:
+                if not s:
+                    return s
+                try:
+                    # Unescape HTML entities then remove tags
+                    t = html.unescape(s)
+                    t = re.sub(r"<[^>]+>", "", t)
+                    t = re.sub(r"\s+", " ", t).strip()
+                    return t
+                except Exception:
+                    return s
 
-            # Record the sync in the database
+            title = _sanitize_title(title)
+            result = self.publish(title=title, content=content, doc_type=doc_type, tags=tags, filename=filename, dry_run=dry_run)
+
+            # Record the sync in the database, using the strong fingerprint when available
             if DB_AVAILABLE:
                 db = get_db()
-                db.record_notion_sync(str(path), result["page_id"], result["url"], result.get("type", "notes"))
+                try:
+                    db.record_notion_sync(str(path), result["page_id"], result["url"], result.get("type", "notes"), file_hash=file_hash)
+                except TypeError:
+                    # Older DB manager without optional param - fall back
+                    db.record_notion_sync(str(path), result["page_id"], result["url"], result.get("type", "notes"))
         finally:
             try:
                 lock.release()
@@ -1052,9 +1361,9 @@ class NotionPublisher:
         return results
 
 
-def sync_all_outputs(output_dir: str = None, force: bool = False) -> Dict[str, Any]:
+def sync_all_outputs(output_dir: str = None, force: bool = False, dry_run: bool = False) -> Dict[str, Any]:
     """
-    Sync all Gold Standard outputs to Notion with intelligent deduplication.
+    Sync all Syndicate outputs to Notion with intelligent deduplication.
 
     Args:
         output_dir: Directory containing output files (default: PROJECT_ROOT/output)
@@ -1077,7 +1386,12 @@ def sync_all_outputs(output_dir: str = None, force: bool = False) -> Dict[str, A
             print("[NOTION] Sync already completed for today, skipping")
             return {"success": [], "skipped": [], "failed": [], "reason": "Already synced today"}
 
-    publisher = NotionPublisher()
+    # If global disable is set, force dry_run mode to avoid any API calls
+    if _DISABLE_NOTION_PUBLISH:
+        print("[NOTION] Global Notion publish disabled via DISABLE_NOTION_PUBLISH; running in dry-run mode.")
+        dry_run = True
+
+    publisher = NotionPublisher(no_client_ok=dry_run)
     results = {"success": [], "skipped": [], "failed": []}
 
     # Find all markdown files recursively
@@ -1086,9 +1400,33 @@ def sync_all_outputs(output_dir: str = None, force: bool = False) -> Dict[str, A
     # Filter out index files and archive
     md_files = [f for f in md_files if "FILE_INDEX" not in f.name and "/archive/" not in str(f).replace("\\", "/")]
 
+    # Apply repository-level ignore patterns so certain internal files (digests, executor outputs)
+    # never get published even when --force is used.
+    def _is_ignored(fpath: Path) -> bool:
+        try:
+            name = fpath.name.lower()
+            s = str(fpath).lower()
+            for p in IGNORE_PATTERNS:
+                if p.lower() in name or p.lower() in s:
+                    return True
+        except Exception:
+            return False
+        return False
+
+    md_files = [f for f in md_files if not _is_ignored(f)]
+
     for filepath in md_files:
         try:
-            result = publisher.sync_file(str(filepath), force=force)
+            result = publisher.sync_file(str(filepath), force=force, dry_run=dry_run)
+
+            # Support future dry-run flows where sync_file returns dry_run results
+            if result.get("dry_run"):
+                if result.get("valid"):
+                    results["success"].append({"file": filepath.name, "dry_run": True, "blocks": result.get("blocks")})
+                else:
+                    results["failed"].append({"file": filepath.name, "error": result.get("errors")})
+                    print(f"✗ {filepath.name} (dry-run): {result.get('errors')}")
+                continue
 
             if result.get("skipped"):
                 results["skipped"].append({"file": filepath.name, "reason": result.get("reason", "unchanged")})
@@ -1102,8 +1440,8 @@ def sync_all_outputs(output_dir: str = None, force: bool = False) -> Dict[str, A
             results["failed"].append({"file": filepath.name, "error": str(e)})
             print(f"✗ {filepath.name}: {e}")
 
-    # Mark task as run
-    if DB_AVAILABLE:
+    # Mark task as run (only for real runs)
+    if DB_AVAILABLE and not dry_run:
         db = get_db()
         db.mark_task_run("notion_sync")
 
@@ -1117,15 +1455,21 @@ def sync_all_outputs(output_dir: str = None, force: bool = False) -> Dict[str, A
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Notion Publisher for Gold Standard")
+    parser = argparse.ArgumentParser(description="Notion Publisher for Syndicate")
     parser.add_argument("--sync-all", action="store_true", help="Sync all outputs to Notion")
     parser.add_argument("--file", type=str, help="Sync a specific file")
     parser.add_argument("--list", action="store_true", help="List recent documents")
     parser.add_argument("--type", type=str, help="Filter by type")
     parser.add_argument("--test", action="store_true", help="Test connection")
     parser.add_argument("--force", action="store_true", help="Force sync even if unchanged")
+    parser.add_argument("--dry-run", action="store_true", help="Validate publish without creating pages")
+    parser.add_argument("--no-notion", action="store_true", help="Disable wet Notion publishes (safe dry-run)")
     parser.add_argument("--status", action="store_true", help="Show sync status")
     args = parser.parse_args()
+
+    # Allow CLI toggle to override environment
+    if getattr(args, 'no_notion', False):
+        globals()['_DISABLE_NOTION_PUBLISH'] = True
 
     try:
         if args.test:
@@ -1153,15 +1497,15 @@ if __name__ == "__main__":
                 print(f"  [{doc['type']}] {doc['title']} ({doc['date']})")
 
         elif args.file:
-            publisher = NotionPublisher()
-            result = publisher.sync_file(args.file, force=args.force)
+            publisher = NotionPublisher(no_client_ok=args.dry_run)
+            result = publisher.sync_file(args.file, force=args.force, dry_run=args.dry_run)
             if result.get("skipped"):
                 print(f"⏭ Skipped: {result.get('reason')}")
             else:
                 print(f"✓ Published: {result['url']}")
 
         elif args.sync_all:
-            results = sync_all_outputs(force=args.force)
+            results = sync_all_outputs(force=args.force, dry_run=args.dry_run)
             print(f"\n✓ Success: {len(results['success'])}")
             print(f"⏭ Skipped: {len(results.get('skipped', []))}")
             print(f"✗ Failed: {len(results['failed'])}")

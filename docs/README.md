@@ -1,18 +1,20 @@
 ```
-   _________ _________ _________ _________ ____ ____ ____ ____
-  ||       |||       |||       |||       |||G |||O |||L |||D ||
-  ||_______|||_______|||_______|||_______|||__|||__|||__|||__||
-  |/_______\|/_______\|/_______\|/_______\|/__\|/__\|/__\|/__\|
-   _________ ____ ____ ____ ____ ____ ____ ____ ____
-  ||       |||S |||T |||A |||N |||D |||A |||R |||D ||
-  ||_______|||__|||__|||__|||__|||__|||__|||__|||__||
-  |/_______\|/__\|/__\|/__\|/__\|/__\|/__\|/__\|/__\|
 
+                                              
+______              __                        
+\  ___)            / _)                       
+ \ \  _  _  _ _  __\ \  ___   ____  _____ ___ 
+  > >| || || | |/ / _ \| \ \ / /  \/ (   ) __)
+ / /_| \| |/ | / ( (_) ) |\ v ( ()  < | |> _) 
+/_____)_   _/|__/ \___/ \_)> < \__/\_\ \_)___)
+        | |               / ^ \               
+        |_|              /_/ \_\              
 
+01010011 01111001 01101110 01100100 01101001 01100011 01100001 01110100 01100101 
 ```
 
-# Gold Standard
-*version 3.6.0* | *stable: 3.6.0* | [CHANGELOG](https://artifact-virtual.gitbook.io/gold-standard)
+# Syndicate
+*version 3.7.0* | *stable: 3.7.0* | [CHANGELOG](https://artifact-virtual.gitbook.io/syndicate)
 
 ![FUCK IT · SHIP IT](https://img.shields.io/badge/FUCK%20IT-SHIP%20IT-2f2f2f?style=for-the-badge&labelColor=6f42c1&logoColor=white)
 
@@ -27,19 +29,19 @@ A comprehensive end-to-end system combining real-time market data, technical ind
 <p align="center">
 
 <!-- CI Status -->
-[![CI](https://img.shields.io/github/actions/workflow/status/amuzetnoM/gold_standard/python-ci.yml?branch=main&style=for-the-badge&logo=github&logoColor=white&label=CI)](https://github.com/amuzetnoM/gold_standard/actions/workflows/python-ci.yml)
-[![Tests](https://img.shields.io/badge/tests-106%20passing-success?style=for-the-badge&logo=pytest&logoColor=white)](https://github.com/amuzetnoM/gold_standard/actions)
-[![Coverage](https://img.shields.io/codecov/c/github/amuzetnoM/gold_standard?style=for-the-badge&logo=codecov&logoColor=white)](https://codecov.io/gh/amuzetnoM/gold_standard)
+[![CI](https://img.shields.io/github/actions/workflow/status/amuzetnoM/syndicate/python-ci.yml?branch=main&style=for-the-badge&logo=github&logoColor=white&label=CI)](https://github.com/amuzetnoM/syndicate/actions/workflows/python-ci.yml)
+[![Tests](https://img.shields.io/badge/tests-106%20passing-success?style=for-the-badge&logo=pytest&logoColor=white)](https://github.com/amuzetnoM/syndicate/actions)
+[![Coverage](https://img.shields.io/codecov/c/github/amuzetnoM/syndicate?style=for-the-badge&logo=codecov&logoColor=white)](https://codecov.io/gh/amuzetnoM/syndicate)
 
 <!-- Tech Stack -->
 [![Python](https://img.shields.io/badge/python-3.10--3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![SQLite](https://img.shields.io/badge/SQLite-3.0-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://www.sqlite.org/index.html)
 [![Docker](https://img.shields.io/badge/docker-20.10-blue?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
-[![GitHub Actions](https://img.shields.io/badge/github%20actions-automated%20ci%2Fcd-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/amuzetnoM/gold_standard/actions)
+[![GitHub Actions](https://img.shields.io/badge/github%20actions-automated%20ci%2Fcd-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/amuzetnoM/syndicate/actions)
 
 <!-- Meta -->
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=for-the-badge)](#)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey?style=for-the-badge)](#)
 
 </p>
 
@@ -95,13 +97,15 @@ A comprehensive end-to-end system combining real-time market data, technical ind
 | **Comprehensive Tagging** | Auto-extracts tickers, keywords (Fed, CPI, FOMC) for complete coverage |
 | **Smart Chart Integration** | Auto-detects tickers and embeds relevant charts in Notion pages |
 | **Usage Management** | Tracks API usage, caches uploads, manages free-tier limits |
+| **Modern Web UI** | Flask-based dashboard with real-time metrics, charts, and task management |
+| **WebSocket Updates** | Live data updates without page refresh via Socket.IO |
 | **Dual Interface** | Command-line CLI and graphical GUI dashboard |
 | **No-AI Mode** | Run data analysis without API calls for testing or offline use |
 
 ---
 
 <p align="center">
-<img src="docs/images/gold_standard-infographic-2d.png" alt="Gold Standard Infographic 2D" />
+<img src="docs/images/syndicate-infographic-2d.png" alt="Syndicate Infographic 2D" />
 </p>
 
 ---
@@ -144,8 +148,8 @@ After setup, edit `.env` and add your `GEMINI_API_KEY`.
 #### 1. Clone and Setup Environment
 
 ```powershell
-git clone https://github.com/amuzetnoM/gold_standard.git
-cd gold_standard
+git clone https://github.com/amuzetnoM/syndicate.git
+cd syndicate
 
 # Create virtual environment (use Python 3.12 for best compatibility)
 py -3.12 -m venv .venv
@@ -303,6 +307,39 @@ The GUI provides:
   - **Reports** - List of all generated reports
   - **Trades** - Trade simulation history and stats
 
+### Modern Web UI (New in 3.7.0) 🌐
+
+Launch the Flask-based web dashboard with real-time updates:
+
+```bash
+# Install web UI dependencies
+bash web_ui/install.sh
+
+# Start web server
+python web_ui/start.py
+
+# Open browser to http://localhost:5000
+```
+
+**Features:**
+- 📊 **Live Dashboard** - Real-time market metrics (Gold, Silver, GSR, bias) with auto-refresh
+- 📈 **Interactive Charts** - Tab-based chart viewer (Gold, Silver, DXY, VIX)
+- 📝 **AI Journal** - Today's AI-generated market analysis with markdown formatting
+- 🏥 **System Health** - Reports generated, tasks pending/completed, win rate
+- 📋 **Task Management** - Monitor autonomous system tasks with status badges
+- ⚡ **WebSocket Updates** - Live data without page refresh via Socket.IO
+- 📱 **Responsive Design** - Works perfectly on desktop, tablet, and mobile
+- 🎨 **Dark Theme** - Professional appearance with stunning gold accents
+
+**Quick API Access:**
+- `GET /api/status` - System health and period info
+- `GET /api/metrics` - Real-time market data
+- `GET /api/journal` - Today's AI analysis
+- `GET /api/tasks` - Task queue status
+- `POST /api/toggles/<feature>` - Control system features
+
+See [`web_ui/README.md`](../web_ui/README.md) for complete documentation, deployment guides, and production setup instructions.
+
 ---
 
 ## Output Samples
@@ -431,7 +468,7 @@ The system includes a comprehensive economic calendar that automatically updates
 ### Calendar Sample Output
 
 ```markdown
-# Gold Standard Economic Calendar
+# Syndicate Economic Calendar
 > Generated: 2025-12-01 | Self-Maintaining | Auto-Updated Each Run
 
 ## This Week's Events
@@ -516,14 +553,14 @@ The system is organized into modular components:
 ---
 
 <p align="center">
-<img src="docs/images/gold_standard-infographic-3d.png" alt="Gold Standard Infographic 3D" />
+<img src="docs/images/syndicate-infographic-3d.png" alt="Syndicate Infographic 3D" />
 </p>
 
 ---
 
 ## Notion Integration
 
-Gold Standard can automatically publish reports to a Notion database with **rich formatting** and **embedded charts**.
+Syndicate can automatically publish reports to a Notion database with **rich formatting** and **embedded charts**.
 
 ### Features
 
@@ -620,7 +657,7 @@ python scripts/cleanup_manager.py --cleanup-all --execute
 
 ## Document Lifecycle Management
 
-Gold Standard v3.3 introduces a document lifecycle system to control which documents are synced to Notion and prevent accidental overwrites.
+Syndicate v3.3 introduces a document lifecycle system to control which documents are synced to Notion and prevent accidental overwrites.
 
 ### Lifecycle States
 
@@ -773,7 +810,7 @@ pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-c
 ## Output Structure
 
 ```
-gold_standard/
+syndicate/
 ├── run.py                    # Unified CLI entry point
 ├── gui.py                    # GUI dashboard application
 ├── main.py                   # Core pipeline (Cortex, QuantEngine, Strategist)
@@ -801,7 +838,7 @@ gold_standard/
 │   └── prevent_secrets.py    # Pre-commit secret detection hook
 │
 ├── data/
-│   └── gold_standard.db      # SQLite database for report storage
+│   └── syndicate.db      # SQLite database for report storage
 |
 ├── tests/
 │   ├── test_core.py          # Core pipeline tests (bias extraction)
@@ -810,7 +847,7 @@ gold_standard/
 │   └── test_ta_fallback.py   # Technical analysis fallback tests
 │
 └── output/
-    ├── gold_standard.log     # Application logs
+    ├── syndicate.log     # Application logs
     ├── Journal_YYYY-MM-DD.md # Daily journal reports
     │
     ├── charts/               # Generated chart images
@@ -914,7 +951,7 @@ The project uses:
 
 ### Logs
 
-Check `output/gold_standard.log` for detailed execution logs.
+Check `output/syndicate.log` for detailed execution logs.
 
 ### No-AI Mode
 
@@ -940,7 +977,13 @@ For detailed technical documentation, indicator explanations, and extension guid
 ---
 
 <p align="center">
-<strong>Gold Standard</strong> — Precious Metals Intelligence Complex
+<strong>Syndicate</strong> — Precious Metals Intelligence Complex
 <br/>
 <em>Quantitative Analysis • AI Insights • Economic Calendar • Live Reports</em>
 </p>
+
+
+                      
+((yndicate
+''       
+> 53 79 6E 64 69 63 61 74 65 

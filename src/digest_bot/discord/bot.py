@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 # ══════════════════════════════════════════════════════════════════════════════
 #  Digest Bot - Discord Bot Core
 #  Copyright (c) 2025 SIRIUS Alpha
@@ -31,6 +32,50 @@ try:
 except ImportError:
     DISCORD_AVAILABLE = False
     discord = None
+    # Provide minimal placeholders so modules importing this file do not fail during test collection
+    commands = None
+
+    class _DummyTasks:
+        """Fallback tasks helper providing a compatible `loop` decorator and loop object."""
+
+        class _DummyLoop:
+            def __init__(self, fn):
+                self.fn = fn
+
+            def before_loop(self, coro):
+                def decorator(f):
+                    return f
+
+                return decorator
+
+            def start(self, *args, **kwargs):
+                return None
+
+            def cancel(self, *args, **kwargs):
+                return None
+
+        def loop(self, *args, **kwargs):
+            def decorator(fn):
+                return _DummyTasks._DummyLoop(fn)
+
+            return decorator
+
+        def start(self, *args, **kwargs):
+            return None
+
+    tasks = _DummyTasks()
+
+# Determine a safe base class to inherit from for environments where discord.py is unavailable
+if DISCORD_AVAILABLE and getattr(commands, "Bot", None):
+    BotBase = commands.Bot
+else:
+    class _DummyBot:
+        """Fallback base class used when discord.py is not installed. Allows importing without raising at module import time."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    BotBase = _DummyBot
 
 from ..config import Config, get_config
 from .self_guide import SelfGuide, ServerBlueprint
@@ -44,7 +89,7 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════════════════
 
 BOT_IDENTITY = """
-I am the Gold Standard Digest Bot, an AI-powered market intelligence assistant.
+I am the Syndicate Digest Bot, an AI-powered market intelligence assistant.
 
 My Purpose:
 - Generate and deliver daily market intelligence digests
@@ -72,7 +117,7 @@ My Values:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class DigestDiscordBot(commands.Bot):
+class DigestDiscordBot(BotBase):
     """
     Self-healing, self-guiding Discord bot for market digests.
 
@@ -307,7 +352,17 @@ class DigestDiscordBot(commands.Bot):
         if not self._log_channel:
             self._log_channel = self.guide.get_channel("🤖-bot-logs")
 
-        logger.info(f"Cached channels: " f"digest={self._digest_channel}, " f"log={self._log_channel}")
+        # Find admin reports channel
+        self._reports_channel = discord.utils.get(self._guild.text_channels, name="📥-reports")
+        if not self._reports_channel:
+            self._reports_channel = self.guide.get_channel("📥-reports")
+
+        # Find public command codex
+        self._commands_codex_channel = discord.utils.get(self._guild.text_channels, name="📋-bot-commands")
+        if not self._commands_codex_channel:
+            self._commands_codex_channel = self.guide.get_channel("📋-bot-commands")
+
+        logger.info(f"Cached channels: " f"digest={self._digest_channel}, " f"log={self._log_channel}, reports={self._reports_channel}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # MESSAGING
@@ -354,6 +409,53 @@ class DigestDiscordBot(commands.Bot):
             self.healer.health.record_error(f"Digest post failed: {e}")
             return None
 
+    async def post_report(
+        self,
+        title: str,
+        content: str,
+        embed: Optional[discord.Embed] = None,
+        attachments: Optional[list] = None,
+    ) -> Optional[discord.Message]:
+        """
+        Post an administrative report to the reports channel (admin inbox).
+
+        Args:
+            title: Short title for the report
+            content: Report body
+            embed: Optional embed
+            attachments: Optional list of file paths to attach
+
+        Returns:
+            Posted message or None
+        """
+        if not self._reports_channel:
+            logger.warning("No reports channel available")
+            return None
+
+        try:
+            files = []
+            if attachments:
+                for path in attachments:
+                    try:
+                        files.append(discord.File(path))
+                    except Exception as e:
+                        logger.warning(f"Failed to attach file {path}: {e}")
+
+            body = f"**{title}**\n{content}"
+
+            if embed:
+                msg = await self._reports_channel.send(body, embed=embed, files=files or None)
+            else:
+                msg = await self._reports_channel.send(body, files=files or None)
+
+            logger.info(f"Posted report to {self._reports_channel.name}")
+            return msg
+
+        except Exception as e:
+            logger.error(f"Failed to post report: {e}")
+            self.healer.health.record_error(f"Report post failed: {e}")
+            return None
+
     def create_digest_embed(
         self,
         title: str,
@@ -379,7 +481,7 @@ class DigestDiscordBot(commands.Bot):
         )
 
         embed.set_author(
-            name="Gold Standard Digest Bot",
+            name="Syndicate Digest Bot",
             icon_url=self.user.avatar.url if self.user and self.user.avatar else None,
         )
 
@@ -455,12 +557,17 @@ class DigestDiscordBot(commands.Bot):
 
             gate = FileGate(self.config)
             status = gate.check_all_gates(today)
+            logger.info("File gate status:\n%s", status.summary())
 
             if status.all_inputs_ready:
                 logger.info("All inputs ready, generating digest...")
 
-                with Summarizer(self.config) as summarizer:
-                    result = summarizer.generate(status, today)
+                # Run summarization in a thread to avoid blocking the event loop (LLM calls are synchronous)
+                def _generate_sync():
+                    with Summarizer(self.config) as summarizer:
+                        return summarizer.generate(status, today)
+
+                result = await __import__('asyncio').to_thread(_generate_sync)
 
                 if result.success:
                     # Write to file
@@ -483,6 +590,40 @@ class DigestDiscordBot(commands.Bot):
                     logger.info("Digest posted successfully!")
                 else:
                     logger.warning(f"Digest generation failed: {result.error}")
+
+                    # Fallback: use deterministic, DB-based report to ensure something useful posts
+                    try:
+                        from ..daily_report import build_report
+                        from db_manager import DatabaseManager
+
+                        logger.info("Attempting deterministic fallback digest from DB")
+                        db = DatabaseManager()
+                        fallback_msg = build_report(db, hours=24)
+
+                        if fallback_msg:
+                            writer = DigestWriter(self.config)
+                            # Create a proper DigestResult for fallback
+                            from ..summarizer import DigestResult
+
+                            fr = DigestResult(content=fallback_msg, success=True, metadata={"fallback": True})
+
+                            writer.write(fr, today)
+
+                            embed = self.create_digest_embed(
+                                f"📊 Daily Digest (Fallback) — {today.isoformat()}",
+                                fallback_msg,
+                                {"fallback": True},
+                            )
+
+                            await self.post_digest(
+                                f"**Daily Market Intelligence (Fallback) for {today.strftime('%A, %B %d, %Y')}**",
+                                embed=embed,
+                            )
+
+                            self._last_digest_date = today
+                            logger.info("Fallback digest posted successfully")
+                    except Exception:
+                        logger.exception("Fallback digest generation/post failed")
             else:
                 logger.info("Not all inputs ready yet")
 

@@ -87,8 +87,11 @@ class GateStatus:
 
     @property
     def all_inputs_ready(self) -> bool:
-        """Check if all required inputs are available."""
-        return self.journal_ready and self.premarket_ready and self.weekly_ready
+        """Check if all required inputs are available.
+
+        For daily digests, require journal and premarket only; weekly is optional.
+        """
+        return self.journal_ready and self.premarket_ready
 
     @property
     def should_skip(self) -> bool:

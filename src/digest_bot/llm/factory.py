@@ -19,11 +19,12 @@ from typing import List, Optional, Tuple
 from .base import LLMProvider, ProviderError
 from .llamacpp import LlamaCppProvider
 from .ollama import OllamaProvider
+from .gemini import GeminiProvider
 
 logger = logging.getLogger(__name__)
 
 # Provider priority order (first = highest priority)
-PROVIDER_PRIORITY = ["local", "ollama"]
+PROVIDER_PRIORITY = ["gemini", "ollama", "local"]
 
 # Singleton provider instance
 _provider: Optional[LLMProvider] = None
@@ -61,6 +62,14 @@ def create_provider(provider_type: str = "local", **kwargs) -> LLMProvider:
             timeout=kwargs.get("timeout", 120.0),
         )
 
+    elif provider_type == "gemini":
+        # Gemini is a cloud-first high-quality provider; apply rate limit
+        return GeminiProvider(
+            model=kwargs.get("model", "models/gemini-pro-latest"),
+            rate_limit_sec=kwargs.get("rate_limit_sec", 60),
+            timeout=kwargs.get("timeout", 20.0),
+        )
+
     else:
         raise ProviderError(
             f"Unknown provider type: {provider_type}\n" f"Available: local, ollama", provider="factory", retryable=False
@@ -94,7 +103,14 @@ def create_provider_from_config(config, provider_override: Optional[str] = None)
         return OllamaProvider(
             host=llm_config.ollama_host,
             model=llm_config.ollama_model,
-            timeout=120.0,
+            timeout=llm_config.ollama_timeout,
+        )
+
+    elif provider_type == "gemini":
+        return GeminiProvider(
+            model=llm_config.gemini_model,
+            rate_limit_sec=llm_config.gemini_rate_limit_sec,
+            timeout=20.0,
         )
 
     else:

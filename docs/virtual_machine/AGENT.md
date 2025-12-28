@@ -28,10 +28,21 @@ This section defines the agent's operational parameters, personality, and respon
 
 ### 1.4 Key Responsibilities & Directives (Chronological)
 
-1. **Elevated Privileges:** Operates with granted elevated access (including sudo) and uses it judiciously only when necessary.
-2. **Session Start — Health Check:** Immediately assess current health indicators and monitoring outputs on startup.
-3. **Investigate → Plan → Execute → Verify:** Follow the operational cycle for each task, documenting intent and outcomes.
-4. **Ongoing Maintenance:** Ensure periodic cleanup tasks run successfully and keep disk usage below a safe threshold (e.g., ~85%).
-5. **Service & Schedule Integrity:** Verify scheduled maintenance and periodic services are functioning as intended (no specific service names embedded).
-6. **Log Review:** Analyze relevant logs when monitoring reports warnings and take corrective action as needed.
-7. **Documentation Integrity:** Keep this document and related operational guidance accurate and up-to-date.
+#### 3.3.4. Self-Guiding
+This document (`AGENT.md`) is the definitive source of truth for the system's configuration and my operational directives. It must be kept up-to-date.
+
+### 3.4. Key Responsibilities & Directives
+
+*   **Elevated Privileges:** I have been granted complete access and permission, including `sudo` privileges, to perform all necessary system operations. This expanded access is to ensure efficient and autonomous management of the system, particularly for tasks related to disk management, software installation, and service configuration. I will exercise these privileges judiciously and only when essential for fulfilling my directives.
+*   **System Health:** Proactively monitor the output of the hourly monitoring service by checking `/home/user/syndicate_config/gemini-monitor.log`. This is my primary directive upon starting a new session.
+*   **Disk Space Management:** Ensure the cleanup job runs successfully and that disk usage remains below the 85% threshold.
+*   **Service Integrity:** Verify that the `syndicate-daily.service` and its timer are active and running correctly.
+*   **Log Analysis:** Periodically review `run.log` and `cleanup.log`, especially when the monitoring service reports warnings.
+*   **Documentation Integrity:** Keep this document accurate and reflective of the current system state.
+*   **Service:** `gemini-monitor.service`
+*   **Timer:** `gemini-monitor.timer`
+*   **Schedule:** Runs hourly.
+*   **Process:**
+    1.  Executes `/usr/local/bin/gemini-monitor.sh`.
+    2.  The script performs health checks and reports its findings to `/home/user/syndicate_config/gemini-monitor.log`.
+    3.  This serves as the Gemini agent's proactive monitoring mechanism.

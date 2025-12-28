@@ -1,5 +1,5 @@
 #!/bin/bash
-# Gold Standard - Automated Setup Script (Unix/macOS/Linux)
+# Syndicate - Automated Setup Script (Unix/macOS/Linux)
 # Run with: chmod +x setup.sh && ./setup.sh
 # Auto-installs Python 3.12 via brew (macOS) or apt/dnf (Linux) if needed
 
@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 echo ""
 echo "========================================"
-echo "   Gold Standard - Automated Setup"
+echo "   Syndicate - Automated Setup"
 echo "========================================"
 echo ""
 
@@ -217,7 +217,7 @@ fi
 # GGUF downloads for llama.cpp fallback
 echo -e "[8/8] Downloading GGUF models..."
 
-GGUF_DIR="$HOME/.cache/gold_standard/models"
+GGUF_DIR="$HOME/.cache/syndicate/models"
 mkdir -p "$GGUF_DIR"
 
 GGUF_FILE="$GGUF_DIR/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
@@ -274,6 +274,27 @@ if [ ! -d "output" ]; then
     mkdir -p output/charts
     mkdir -p output/reports/charts
     echo -e "${GREEN}Created output directories.${NC}"
+fi
+
+# Install systemd unit files and enable services (first-run only)
+if command -v systemctl &> /dev/null && [ -d "/run/systemd/system" ]; then
+    if [ -d "deploy/systemd" ]; then
+        if [ ! -f ".setup_systemd_done" ]; then
+            echo -e "[9/9] Installing systemd unit files and enabling monitor/service units (requires sudo)..."
+            sudo cp -n deploy/systemd/* /etc/systemd/system/ || echo -e "${YELLOW}WARNING: Failed to copy some unit files.${NC}"
+            sudo systemctl daemon-reload
+            # Enable and start monitor if unit exists
+            if [ -f "/etc/systemd/system/syndicate-monitor.service" ]; then
+                sudo systemctl enable --now syndicate-monitor.service || echo -e "${YELLOW}WARNING: Failed to enable/start syndicate-monitor.service${NC}"
+            fi
+            # Attempt to enable core services if present
+            sudo systemctl enable --now syndicate-discord-bot.service syndicate-llm-worker.service syndicate-daily-llm-report.timer || true
+            touch .setup_systemd_done
+            echo -e "${GREEN}Systemd units installed and monitor enabled (if present).${NC}"
+        else
+            echo -e "${YELLOW}Systemd units already installed in a previous setup run; skipping.${NC}"
+        fi
+    fi
 fi
 
 echo ""

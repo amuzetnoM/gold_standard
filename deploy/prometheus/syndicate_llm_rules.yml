@@ -1,0 +1,29 @@
+groups:
+  - name: syndicate_llm.rules
+    rules:
+      - alert: GoldStandardLLMQueueGrowing
+        expr: gost_llm_queue_length > 10
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "LLM queue length high ({{ $value }})"
+          description: "The LLM task queue has more than 10 pending tasks for >5m. Current value: {{ $value }}."
+
+      - alert: GoldStandardLLMWorkerDown
+        expr: gost_llm_worker_running == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "LLM worker is not running"
+          description: "The persistent LLM worker process reports not running. Investigate the service and logs."
+
+      - alert: GoldStandardLLMSanitizerCorrections
+        expr: gost_llm_sanitizer_corrections_total > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM sanitizer made corrections"
+          description: "The LLM content sanitizer corrected one or more numeric mismatches in generated reports. Check audit logs for details."

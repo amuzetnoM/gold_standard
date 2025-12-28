@@ -7,7 +7,7 @@
 # /_______  /|___||____|_  /___|______/ /_______  (____  /____/   __/|___|  (____  /
 #         \/             \/                     \/     \/     |__|        \/     \/
 #
-# Gold Standard - Precious Metals Intelligence System
+# Syndicate - Precious Metals Intelligence System
 # Copyright (c) 2025 SIRIUS Alpha
 # All rights reserved.
 # ══════════════════════════════════════════════════════════════════════════════
@@ -100,6 +100,14 @@ except Exception:
 genai = None
 mpf = None
 import yfinance as yf
+
+# Compatibility: ensure yf.download exists for test monkeypatches and legacy callers
+if yf is not None and not hasattr(yf, "download"):
+    def _yf_download(ticker, *args, **kwargs):
+        t = yf.Ticker(ticker)
+        return t.history(*args, **kwargs)
+
+    yf.download = _yf_download
 from colorama import init
 
 # ==========================================
@@ -109,7 +117,7 @@ from colorama import init
 # Load .env early so credentials in the repo are available for provider init
 try:
     try:
-        from gold_standard.utils.env_loader import load_env
+        from syndicate.utils.env_loader import load_env
 
         load_env()
     except Exception:
@@ -797,7 +805,7 @@ def setup_logging(config: Config) -> logging.Logger:
         logger.addHandler(console_handler)
 
     # File handler for detailed logs (rotating)
-    log_file = os.path.join(config.OUTPUT_DIR, "gold_standard.log")
+    log_file = os.path.join(config.OUTPUT_DIR, "syndicate.log")
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
     file_handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
@@ -851,7 +859,7 @@ def signal_handler(signum: int, frame: Any) -> None:
 # ==========================================
 class Cortex:
     """
-    Advanced persistent memory system for the Gold Standard algo.
+    Advanced persistent memory system for the Syndicate algo.
     Tracks predictions, grades performance, and manages hypothetical trade positions.
     Uses file locking to prevent corruption from concurrent access.
     """
@@ -1300,14 +1308,17 @@ class QuantEngine:
         self._cleanup_old_charts()
 
         # Fetch data for each asset in parallel to reduce wall time
-        workers = min(6, max(2, len(ASSETS)))
+        # Use single-threaded fetch to avoid yfinance concurrency issues that may
+        # cause mismatched or duplicated data across assets.
+        workers = 1
         futures = {}
         with ThreadPoolExecutor(max_workers=workers) as ex:
             for key, conf in ASSETS.items():
                 conf = ASSETS[key]
                 futures[ex.submit(self._fetch, conf["p"], conf["b"])] = (key, conf)
 
-            for fut in futures:
+            from concurrent.futures import as_completed
+            for fut in as_completed(futures):
                 key, conf = futures[fut]
                 try:
                     df = fut.result()
@@ -1350,6 +1361,25 @@ class QuantEngine:
                         "sma200": round(sma200, 2) if sma200 is not None else None,
                     }
 
+                    # Persist snapshot to DB for historical use (best-effort)
+                    try:
+                        from db_manager import get_db, AnalysisSnapshot
+                        snap = AnalysisSnapshot(
+                            date=str(datetime.date.today()),
+                            asset=key,
+                            price=snapshot[key]["price"],
+                            rsi=snapshot[key].get("rsi"),
+                            sma_50=None,
+                            sma_200=snapshot[key].get("sma200"),
+                            atr=snapshot[key].get("atr"),
+                            adx=snapshot[key].get("adx"),
+                            trend=snapshot[key].get("regime"),
+                            raw_data=None,
+                        )
+                        get_db().save_analysis_snapshot(snap)
+                    except Exception as _:
+                        self.logger.debug("Failed to persist analysis snapshot", exc_info=True)
+
                     # Fetch news headlines
                     self._fetch_news(key, conf["p"])
 
@@ -1368,6 +1398,36 @@ class QuantEngine:
         if not snapshot:
             self.logger.error("Failed to fetch any market data")
             return None
+
+        # Diagnostic: detect uniform prices across assets which is a sign
+        # of an upstream mapping or aggregation bug.
+        try:
+            prices = [v.get('price') for v in snapshot.values() if isinstance(v, dict) and 'price' in v]
+            unique_prices = set(prices)
+            if len(prices) > 1 and len(unique_prices) == 1:
+                msg = f"Uniform prices detected across assets: {unique_prices}. This may indicate a mapping/fetch bug."
+                self.logger.warning(msg)
+                try:
+                    # Increment a metrics counter if available
+                    try:
+                        from syndicate.metrics.server import METRICS
+
+                        if METRICS and "uniform_price_alerts_total" in METRICS:
+                            METRICS["uniform_price_alerts_total"].inc()
+                    except Exception:
+                        # metric increment is non-critical
+                        self.logger.debug("Failed to increment uniform_price_alerts_total metric", exc_info=True)
+
+                    # Send an alert to the configured Discord webhook to notify operators
+                    from scripts.notifier import send_discord
+
+                    send_discord(f"[Syndicate] {msg}")
+                except Exception:
+                    # Non-critical: log failure to send alert but do not fail the run
+                    self.logger.debug("Failed to send uniform-price alert", exc_info=True)
+        except Exception:
+            # Non-critical diagnostic - do not fail the run
+            pass
 
         # Calculate intermarket ratios
         snapshot = self._compute_intermarket_ratios(snapshot)
@@ -1943,17 +2003,21 @@ class Strategist:
         prompt = self._build_prompt(gsr, vix_price, data_dump)
 
         try:
-            if not self.model:
-                raise RuntimeError("AI model not available")
-            response = self.model.generate_content(prompt)
-            response_text = response.text
+            # Enforce Gemini-only for journal generation (strict policy)
+            try:
+                gem = GeminiProvider(self.config.GEMINI_MODEL)
+                response = gem.generate_content(prompt)
+                response_text = response.text
+            except Exception as ge:
+                self.logger.error(f"Gemini generation failed for Journal (strict): {ge}", exc_info=True)
+                return f"Error generating journal with Gemini: {ge}", "NEUTRAL"
 
             bias = self._extract_bias(response_text)
             self.logger.info(f"AI analysis complete. Bias: {bias}")
             return response_text, bias
 
         except Exception as e:
-            self.logger.error(f"AI generation error: {e}", exc_info=True)
+            self.logger.error(f"Unexpected AI generation error: {e}", exc_info=True)
             return f"Error generating analysis: {e}", "NEUTRAL"
 
     def _format_data_summary(self) -> str:
@@ -2024,7 +2088,7 @@ class Strategist:
         trades_context = self._get_active_trades_context()
 
         return f"""
-You are "Gold Standard" - an elite quantitative trading algorithm operating for a sophisticated hedge fund.
+You are "Syndicate" - an elite quantitative trading algorithm operating for a sophisticated hedge fund.
 Your analysis must be precise, actionable, and reflect deep market understanding.
 
 === SYSTEM STATE ===
@@ -2115,7 +2179,7 @@ Entry Conditions:
 * Confidence calibration
 
 ---
-*Generated by Gold Standard Quant Engine*
+*Generated by Syndicate Quant Engine*
 """
 
     def _extract_bias(self, text: str) -> str:
@@ -2267,7 +2331,7 @@ def execute(
 
         # Instrument charts/report generation for Prometheus if available
         try:
-            from gold_standard.metrics import METRICS
+            from syndicate.metrics import METRICS
 
             METRICS["charts_generated_total"].inc()
         except Exception:
@@ -2357,7 +2421,7 @@ def main() -> None:
     # (Already loaded at module import time)
 
     # Parse CLI arguments
-    parser = argparse.ArgumentParser(description="Gold Standard Quant Analysis")
+    parser = argparse.ArgumentParser(description="Syndicate Quant Analysis")
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit")
     parser.add_argument(
         "--wait", action="store_true", help="Wait (bounded by timeout) for post-analysis tasks to complete before exit"
@@ -2391,7 +2455,7 @@ def main() -> None:
 
     # Start metrics server (Prometheus) if available
     try:
-        from gold_standard.metrics import set_readiness, start_metrics_server
+        from syndicate.metrics import set_readiness, start_metrics_server
 
         start_metrics_server()
         # Mark readiness; modules may update later
@@ -2424,7 +2488,7 @@ def main() -> None:
     try:
         from scripts.console_ui import render_system_banner
 
-        render_system_banner("Gold Standard", f"Run interval: {config.RUN_INTERVAL_HOURS} hours")
+        render_system_banner("Syndicate", f"Run interval: {config.RUN_INTERVAL_HOURS} hours")
     except Exception:
         logger.info("GOLD STANDARD SYSTEM ONLINE")
         logger.info(f"Run interval: {config.RUN_INTERVAL_HOURS} hours")

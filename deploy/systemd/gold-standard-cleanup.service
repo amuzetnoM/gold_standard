@@ -1,0 +1,13 @@
+[Unit]
+Description=Syndicate Cleanup and Retirement Service
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/run_syndicate_cleanup.sh
+WorkingDirectory=/mnt/disk/syndicate
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
