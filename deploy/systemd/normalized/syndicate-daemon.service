@@ -8,7 +8,7 @@ User=ali_shakil_backup_gmail_com
 WorkingDirectory=/home/ali_shakil_backup_gmail_com/syndicate
 Environment="PYTHONPATH=/home/ali_shakil_backup_gmail_com/syndicate" # pragma: allowlist secret
 Environment="LLM_PROVIDER=local"
-ExecStart=/home/ali_shakil_backup_gmail_com/miniforge3/envs/syndicate/bin/python run.py --daemon --interval-minutes 240
+ExecStart=/home/ali_shakil_backup_gmail_com/miniforge3/envs/syndicate/bin/python run.py --interval-min 240
 Restart=always
 RestartSec=60
 StandardOutput=journal
