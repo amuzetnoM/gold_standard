@@ -17,11 +17,17 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .config import Config, get_config
 from .file_gate import Document, GateStatus
-from .llm import GenerationConfig, LLMProvider, get_provider_with_fallback
+from .llm import (
+    PROVIDER_PRIORITY,
+    GenerationConfig,
+    LLMProvider,
+    create_provider_from_config,
+    get_provider_with_fallback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +192,8 @@ def truncate_content(content: str, max_tokens: int = 1500) -> str:
 
     return truncated + "\n\n[... content truncated for length ...]"
 
+    return content.strip()
+
 
 def clean_content(content: str) -> str:
     """
@@ -211,6 +219,82 @@ def clean_content(content: str) -> str:
     content = re.sub(r"^={3,}$", "", content, flags=re.MULTILINE)
 
     return content.strip()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# QUALITY SCORING
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class QualityScorer:
+    """
+    Evaluates the quality of a generated digest.
+
+    Checks for:
+    - Structure: Key Takeaways, Actionable Next Steps, Rationale
+    - Detail: Price levels, percentages, indicators
+    - Brevity: Length constraints
+    """
+
+    def score(self, content: str) -> Tuple[float, List[str]]:
+        """
+        Score a digest on a 0-1.0 scale and provide feedback.
+
+        Returns:
+            Tuple of (score, list of feedback points)
+        """
+        score = 0.0
+        feedback = []
+
+        if not content or len(content.strip()) < 50:
+            return 0.0, ["Response is empty or critically short"]
+
+        # 1. Structure Check (30%)
+        structure_score = 0.0
+        if re.search(r"(?i)Key Takeaways", content):
+            structure_score += 0.1
+        if re.search(r"(?i)Actionable Next Steps", content):
+            structure_score += 0.1
+        if re.search(r"(?i)Rationale", content):
+            structure_score += 0.1
+
+        if structure_score < 0.3:
+            feedback.append("Missing required sections (Key Takeaways, Next Steps, or Rationale)")
+        score += structure_score
+
+        # 2. Detail Check (40%)
+        # Look for numbers/price levels (e.g., $2,400, 1.2%, 1850.50)
+        financial_patterns = [
+            r"\$\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?",  # $ prices
+            r"\d+(?:\.\d+)?\s*%",  # percentages
+            r"\b[A-Z]{3}/[A-Z]{3}\b",  # currency pairs XAU/USD
+            r"\d+\.\d{2,}",  # raw decimals (like price levels)
+        ]
+
+        detail_matches = 0
+        for pattern in financial_patterns:
+            matches = re.findall(pattern, content)
+            detail_matches += len(matches)
+
+        if detail_matches >= 5:
+            score += 0.4
+        elif detail_matches >= 2:
+            score += 0.2
+            feedback.append("Suggest more specific price levels or data points")
+        else:
+            feedback.append("Critically low on specific financial data/levels")
+
+        # 3. Brevity Check (30%)
+        word_count = len(content.split())
+        if 100 <= word_count <= 400:
+            score += 0.3
+        elif 50 <= word_count <= 500:
+            score += 0.15
+            feedback.append("Length is slightly outside optimal range (100-400 words)")
+        else:
+            feedback.append(f"Length issue: {word_count} words is too short/long")
+
+        return round(score, 2), feedback
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -264,6 +348,7 @@ class Summarizer:
         self.config = config or get_config()
         self._provider = provider
         self._provider_loaded = False
+        self.scorer = QualityScorer()
 
     @property
     def provider(self) -> LLMProvider:
@@ -374,55 +459,83 @@ class Summarizer:
             )
 
         try:
-            # Ensure provider is loaded
-            self._ensure_provider_loaded()
+            # Determine provider order (primary followed by others)
+            primary_type = self.config.llm.provider
+            provider_types = [primary_type] + [p for p in PROVIDER_PRIORITY if p != primary_type]
 
-            # Build prompt
-            prompt = self.build_prompt(status, target)
-            logger.debug(f"Prompt length: {len(prompt)} chars")
+            last_error = None
 
-            # Configure generation
-            # Note: Using specific stop sequences to prevent document boundary confusion
-            # Avoid "---" alone as it's too common in markdown
-            gen_config = GenerationConfig(
-                max_tokens=self.config.llm.max_tokens,
-                temperature=self.config.llm.temperature,
-                stop_sequences=["## Document 1:", "## Document 2:", "## Document 3:"],
-            )
+            for provider_type in provider_types:
+                try:
+                    logger.info("Attempting generation with provider: %s", provider_type)
 
-            # Generate with retry
-            response = self.provider.generate_with_retry(
-                prompt=prompt,
-                config=gen_config,
-                max_retries=self.config.llm.max_retries,
-                retry_delay=self.config.llm.retry_delay,
-            )
+                    # Create or reuse provider
+                    if provider_type == primary_type:
+                        provider = self.provider
+                    else:
+                        # For fallback, create a fresh provider
+                        provider = create_provider_from_config(self.config, provider_override=provider_type)
+                        provider.load()
 
-            # Validate response
-            if not response.text or len(response.text.strip()) < 50:
-                return DigestResult(
-                    content="",
-                    success=False,
-                    error="LLM returned empty or too short response",
-                    metadata={"raw_response": response.raw_response},
-                )
+                    # Build prompt
+                    prompt = self.build_prompt(status, target)
 
-            logger.info(
-                f"Generated digest: {response.tokens_used} tokens in "
-                f"{response.generation_time:.2f}s "
-                f"({response.tokens_per_second:.1f} tok/s)"
-            )
+                    # Configure generation
+                    gen_config = GenerationConfig(
+                        max_tokens=self.config.llm.max_tokens,
+                        temperature=self.config.llm.temperature,
+                        stop_sequences=["## Document 1:", "## Document 2:", "## Document 3:"],
+                    )
 
+                    # Generate with retry
+                    response = provider.generate_with_retry(
+                        prompt=prompt,
+                        config=gen_config,
+                        max_retries=self.config.llm.max_retries if provider_type == primary_type else 1,
+                        retry_delay=self.config.llm.retry_delay,
+                    )
+
+                    # Validate response length
+                    if not response.text or len(response.text.strip()) < 50:
+                        logger.warning("Provider %s returned empty/short response", provider_type)
+                        continue
+
+                    # ══════════════════════════════════════════════════════════════════════════
+                    # QUALITY SCORING
+                    # ══════════════════════════════════════════════════════════════════════════
+                    score, feedback = self.scorer.score(response.text)
+                    logger.info("Provider %s quality score: %s/1.0", provider_type, score)
+
+                    # If quality is decent, accept it
+                    if score >= 0.5:
+                        return DigestResult(
+                            content=response.text.strip(),
+                            success=True,
+                            metadata={
+                                "tokens_used": response.tokens_used,
+                                "generation_time": response.generation_time,
+                                "model": response.model,
+                                "provider": response.provider,
+                                "finish_reason": response.finish_reason,
+                                "quality_score": score,
+                                "quality_feedback": feedback,
+                            },
+                        )
+                    else:
+                        logger.warning("Low quality from %s. Feedback: %s", provider_type, ", ".join(feedback))
+                        last_error = f"Low quality score ({score}) from {provider_type}"
+                        continue  # Try next provider
+
+                except Exception as e:
+                    logger.warning("Provider %s failed: %s", provider_type, e)
+                    last_error = str(e)
+                    continue
+
+            # If we reach here, all providers failed or were low quality
             return DigestResult(
-                content=response.text.strip(),
-                success=True,
-                metadata={
-                    "tokens_used": response.tokens_used,
-                    "generation_time": response.generation_time,
-                    "model": response.model,
-                    "provider": response.provider,
-                    "finish_reason": response.finish_reason,
-                },
+                content="",
+                success=False,
+                error=f"All providers failed or produced low quality. Last error: {last_error}",
             )
 
         except Exception as e:

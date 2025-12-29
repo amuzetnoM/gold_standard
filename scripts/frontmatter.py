@@ -368,8 +368,10 @@ def generate_frontmatter(
     lines.append(f'title: "{title}"')
     lines.append(f"date: {doc_date}")
     lines.append(f"status: {status}")
+    lines.append("version: 1.0")
     lines.append(f"ai_processed: {str(ai_processed).lower()}")
     lines.append(f"generated: {datetime.now().isoformat()}")
+    lines.append(f"last_modified: {datetime.now().isoformat()}")
 
     if tags:
         tags_str = ", ".join(tags)
@@ -471,6 +473,18 @@ def parse_frontmatter(content: str) -> tuple[Dict[str, Any], str]:
 # Document lifecycle status constants
 VALID_STATUSES = ("draft", "in_progress", "review", "published", "archived")
 
+# Notion sync status constants
+SYNC_STATUSES = ("pending", "syncing", "synced", "failed", "skipped")
+
+# Notion sync tracking schema fields
+NOTION_SYNC_FIELDS = (
+    "notion_page_id",  # Notion page UUID after successful publish
+    "last_synced",  # ISO timestamp of last successful sync
+    "sync_status",  # pending|syncing|synced|failed|skipped
+    "sync_error",  # Error message if sync failed
+    "sync_attempts",  # Number of sync attempts
+)
+
 
 def get_document_status(content: str) -> str:
     """
@@ -552,6 +566,213 @@ def is_draft(content: str) -> bool:
     frontmatter, _ = parse_frontmatter(content)
     status = frontmatter.get("status", "draft")
     return status == "draft"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NOTION SYNC TRACKING
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def is_synced_to_notion(content: str) -> bool:
+    """
+    Check if document has been successfully synced to Notion.
+
+    Returns:
+        True if document has a notion_page_id and sync_status is 'synced'
+    """
+    frontmatter, _ = parse_frontmatter(content)
+    page_id = frontmatter.get("notion_page_id")
+    sync_status = frontmatter.get("sync_status", "pending")
+    return bool(page_id) and sync_status == "synced"
+
+
+def get_notion_page_id(content: str) -> Optional[str]:
+    """
+    Get the Notion page ID from document frontmatter.
+
+    Returns:
+        Notion page UUID or None if not synced
+    """
+    frontmatter, _ = parse_frontmatter(content)
+    return frontmatter.get("notion_page_id")
+
+
+def get_sync_status(content: str) -> str:
+    """
+    Get the Notion sync status from document frontmatter.
+
+    Returns:
+        Sync status (pending|syncing|synced|failed|skipped) or 'pending' if not set
+    """
+    frontmatter, _ = parse_frontmatter(content)
+    return frontmatter.get("sync_status", "pending")
+
+
+def needs_sync(content: str) -> bool:
+    """
+    Check if document needs to be synced to Notion.
+
+    A document needs sync if:
+    - status is 'published'
+    - AND (no notion_page_id OR sync_status is 'pending' or 'failed')
+
+    Returns:
+        True if document should be synced
+    """
+    frontmatter, _ = parse_frontmatter(content)
+
+    # Must be published to sync
+    status = frontmatter.get("status", "draft")
+    if status not in ("published", "complete"):
+        return False
+
+    # Check if already synced
+    page_id = frontmatter.get("notion_page_id")
+    sync_status = frontmatter.get("sync_status", "pending")
+
+    # Needs sync if no page ID or if sync failed/pending
+    if not page_id:
+        return True
+    if sync_status in ("pending", "failed"):
+        return True
+
+    return False
+
+
+def mark_synced(
+    content: str,
+    filename: str,
+    notion_page_id: str,
+) -> str:
+    """
+    Mark document as successfully synced to Notion.
+
+    Updates frontmatter with:
+    - notion_page_id: The Notion page UUID
+    - last_synced: Current timestamp
+    - sync_status: 'synced'
+
+    Args:
+        content: Document content with frontmatter
+        filename: Filename for frontmatter regeneration
+        notion_page_id: The Notion page UUID
+
+    Returns:
+        Updated content with sync tracking fields
+    """
+    frontmatter, body = parse_frontmatter(content)
+
+    if frontmatter:
+        frontmatter["notion_page_id"] = notion_page_id
+        frontmatter["last_synced"] = datetime.now().isoformat()
+        frontmatter["sync_status"] = "synced"
+        frontmatter["sync_attempts"] = frontmatter.get("sync_attempts", 0) + 1
+        # Clear any previous error
+        if "sync_error" in frontmatter:
+            del frontmatter["sync_error"]
+
+        return _rebuild_frontmatter(frontmatter, body)
+    else:
+        return add_frontmatter(
+            content,
+            filename,
+            custom_fields={
+                "notion_page_id": notion_page_id,
+                "last_synced": datetime.now().isoformat(),
+                "sync_status": "synced",
+                "sync_attempts": 1,
+            },
+        )
+
+
+def mark_sync_failed(
+    content: str,
+    filename: str,
+    error: str,
+) -> str:
+    """
+    Mark document sync as failed.
+
+    Updates frontmatter with:
+    - sync_status: 'failed'
+    - sync_error: Error message
+    - sync_attempts: Incremented count
+
+    Args:
+        content: Document content with frontmatter
+        filename: Filename for frontmatter regeneration
+        error: Error message describing the failure
+
+    Returns:
+        Updated content with failure tracking
+    """
+    frontmatter, body = parse_frontmatter(content)
+
+    if frontmatter:
+        frontmatter["sync_status"] = "failed"
+        frontmatter["sync_error"] = error[:200]  # Truncate long errors
+        frontmatter["sync_attempts"] = frontmatter.get("sync_attempts", 0) + 1
+
+        return _rebuild_frontmatter(frontmatter, body)
+    else:
+        return add_frontmatter(
+            content,
+            filename,
+            custom_fields={
+                "sync_status": "failed",
+                "sync_error": error[:200],
+                "sync_attempts": 1,
+            },
+        )
+
+
+def mark_syncing(content: str, filename: str) -> str:
+    """
+    Mark document as currently being synced (for locking).
+
+    Args:
+        content: Document content with frontmatter
+        filename: Filename for frontmatter regeneration
+
+    Returns:
+        Updated content with syncing status
+    """
+    frontmatter, body = parse_frontmatter(content)
+
+    if frontmatter:
+        frontmatter["sync_status"] = "syncing"
+        return _rebuild_frontmatter(frontmatter, body)
+    else:
+        return add_frontmatter(content, filename, custom_fields={"sync_status": "syncing"})
+
+
+def _rebuild_frontmatter(frontmatter: Dict[str, Any], body: str) -> str:
+    """
+    Rebuild document from frontmatter dict and body content.
+
+    Args:
+        frontmatter: Frontmatter dictionary
+        body: Document body without frontmatter
+
+    Returns:
+        Complete document with rebuilt frontmatter
+    """
+    lines = ["---"]
+    for key, value in frontmatter.items():
+        if isinstance(value, list):
+            lines.append(f"{key}: [{', '.join(str(v) for v in value)}]")
+        elif isinstance(value, bool):
+            lines.append(f"{key}: {str(value).lower()}")
+        elif isinstance(value, str) and (" " in value or '"' in value):
+            # Quote strings with spaces or quotes
+            escaped = value.replace('"', '\\"')
+            lines.append(f'{key}: "{escaped}"')
+        else:
+            lines.append(f"{key}: {value}")
+    lines.append(f"last_modified: {datetime.now().isoformat()}")
+    lines.append("---")
+    lines.append("")
+    return "\n".join(lines) + body
 
 
 def mark_ai_pending(content: str, filename: str, reason: str = "quota") -> str:

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+
 from discord.ext import commands, tasks
 
+from src.digest_bot.discord.content_router import ContentType
+
 LOG = logging.getLogger("digest_bot.discord.reporting")
+
 
 class ReportingCog(commands.Cog):
     def __init__(self, bot):
@@ -17,17 +21,17 @@ class ReportingCog(commands.Cog):
 
     @tasks.loop(hours=24)
     async def daily_report(self):
-        # Placeholder: call the same report generation used by `daily_report.py`
+        """Generate and post the daily report using the content router."""
         try:
-            from ..daily_report import build_report
             from db_manager import DatabaseManager
+
+            from ..daily_report import build_report
+
             db = DatabaseManager()
             msg = build_report(db)
-            if self.channel_id:
-                ch = await self.bot._bot.fetch_channel(int(self.channel_id))
-                await ch.send(msg)
-            else:
-                LOG.warning("DISCORD_OPS_CHANNEL_ID not set; skipping daily report post")
+
+            # Use the bot's post_content method which handles routing
+            await self.bot.post_content(msg, content_type=ContentType.DIGEST)
         except Exception:
             LOG.exception("Failed to send daily report")
 
@@ -40,11 +44,14 @@ class ReportingCog(commands.Cog):
     @commands.has_role("operators")
     async def cmd_report(self, ctx, hours: int = 24):
         """Generate a short report and post into the channel (role: operators)."""
-        from ..daily_report import build_report
         from db_manager import DatabaseManager
+
+        from ..daily_report import build_report
+
         db = DatabaseManager()
         msg = build_report(db, hours=hours)
         await ctx.send(msg)
+
 
 def setup(bot):
     return ReportingCog(bot)

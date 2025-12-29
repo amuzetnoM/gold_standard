@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Syndicate Notion Publisher every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=syndicate-publish.service
+
+[Install]
+WantedBy=timers.target

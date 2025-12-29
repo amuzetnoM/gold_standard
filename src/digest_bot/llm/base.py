@@ -44,6 +44,50 @@ class ConnectionError(ProviderError):
     pass
 
 
+class CircuitBreaker:
+    """
+    Tracks failures and prevents calls to a failing provider.
+
+    States:
+    - CLOSED: Normal operation, calls allowed.
+    - OPEN: Too many failures, calls blocked until reset_timeout.
+    - HALF_OPEN: Testing if provider has recovered.
+    """
+
+    def __init__(self, failure_threshold: int = 3, reset_timeout: int = 300):
+        self.failure_threshold = failure_threshold
+        self.reset_timeout = reset_timeout
+        self.failures = 0
+        self.last_failure_time = 0.0
+        self.state = "CLOSED"
+
+    def record_success(self):
+        """Reset failures on success."""
+        self.failures = 0
+        self.state = "CLOSED"
+
+    def record_failure(self):
+        """Increment failures and potentially open circuit."""
+        self.failures += 1
+        self.last_failure_time = time.time()
+        if self.failures >= self.failure_threshold:
+            self.state = "OPEN"
+
+    def can_attempt(self) -> bool:
+        """Check if call can be attempted."""
+        if self.state == "CLOSED":
+            return True
+
+        # Check for timeout in OPEN state
+        if self.state == "OPEN":
+            if time.time() - self.last_failure_time > self.reset_timeout:
+                self.state = "HALF_OPEN"
+                return True
+            return False
+
+        return True  # HALF_OPEN allows one trial
+
+
 @dataclass
 class LLMResponse:
     """
@@ -135,6 +179,7 @@ class LLMProvider(ABC):
     def __init__(self):
         self._loaded = False
         self._model_name = ""
+        self.circuit_breaker = CircuitBreaker()
 
     @property
     def is_loaded(self) -> bool:
@@ -220,10 +265,16 @@ class LLMProvider(ABC):
         """
         last_error = None
 
+        if not self.circuit_breaker.can_attempt():
+            raise ProviderError(f"Circuit breaker is OPEN for {self.name}", provider=self.name, retryable=False)
+
         for attempt in range(max_retries + 1):
             try:
-                return self.generate(prompt, config)
+                result = self.generate(prompt, config)
+                self.circuit_breaker.record_success()
+                return result
             except ProviderError as e:
+                self.circuit_breaker.record_failure()
                 last_error = e
                 if not e.retryable or attempt >= max_retries:
                     raise

@@ -1,0 +1,12 @@
+[Unit]
+Description=Syndicate - Notion Publisher
+After=network.target
+
+[Service]
+Type=oneshot
+User=ali_shakil_backup_gmail_com
+WorkingDirectory=/home/ali_shakil_backup_gmail_com/syndicate
+Environment="PYTHONPATH=/home/ali_shakil_backup_gmail_com/syndicate" # pragma: allowlist secret
+ExecStart=/home/ali_shakil_backup_gmail_com/miniforge3/envs/syndicate/bin/python scripts/notion_publisher.py
+StandardOutput=journal
+StandardError=journal

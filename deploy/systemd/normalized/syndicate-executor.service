@@ -1,0 +1,17 @@
+[Unit]
+Description=Syndicate - Task Executor Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=ali_shakil_backup_gmail_com
+WorkingDirectory=/home/ali_shakil_backup_gmail_com/syndicate
+Environment="PYTHONPATH=/home/ali_shakil_backup_gmail_com/syndicate" # pragma: allowlist secret
+ExecStart=/home/ali_shakil_backup_gmail_com/miniforge3/envs/syndicate/bin/python scripts/executor_daemon.py --daemon
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

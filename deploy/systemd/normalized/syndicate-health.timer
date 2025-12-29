@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Syndicate Health Watchdog every hour
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+Unit=syndicate-health.service
+
+[Install]
+WantedBy=timers.target

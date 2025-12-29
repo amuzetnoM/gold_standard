@@ -17,15 +17,15 @@ Python-based publisher that syncs reports to Notion database.
 Includes intelligent deduplication to prevent publishing the same content multiple times.
 """
 
+import logging
 import os
+import random
 import re
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List
-import logging
-import random
 
 # Add parent to path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -56,8 +56,9 @@ except Exception:
 # Global env toggle to disable wet Notion publishes for safe testing
 _DISABLE_NOTION_PUBLISH = str(os.getenv("DISABLE_NOTION_PUBLISH", "0")).lower() in ("1", "true", "yes")
 import hashlib
-from filelock import FileLock
 import html
+
+from filelock import FileLock
 
 # Import database manager for sync tracking
 try:
@@ -704,13 +705,13 @@ class NotionPublisher:
 
         def _normalize_tags(tag_list: List[str]) -> List[str]:
             out = []
-            for t in (tag_list or []):
+            for t in tag_list or []:
                 try:
                     tn = str(t).strip()
                     # Remove stray punctuation
                     tn = re.sub(r"[^A-Za-z0-9\-\._ /]", "", tn)
                     # If looks like a ticker symbol, uppercase
-                    if tn.isupper() or (len(tn) <= 5 and tn.replace('.', '').isalpha()):
+                    if tn.isupper() or (len(tn) <= 5 and tn.replace(".", "").isalpha()):
                         tn = tn.upper()
                     else:
                         tn = tn.title()
@@ -890,7 +891,7 @@ class NotionPublisher:
 
                 # If it's a property-type error, attempt the Status/Minimal fallbacks before retrying
                 try:
-                    db_props = db_props if 'db_props' in locals() else self._get_database_properties()
+                    db_props = db_props if "db_props" in locals() else self._get_database_properties()
                     # If Status property exists, ensure the chosen option is valid for the DB schema
                     if "Status" in properties and "Status" in db_props:
                         prop_type = db_props["Status"].get("type")
@@ -929,7 +930,9 @@ class NotionPublisher:
                             opts = prop_payload.get(ptype, {}).get("options") if ptype else None
                             if not opts:
                                 # Try alternate structures
-                                opts = prop_payload.get("status", {}).get("options") or prop_payload.get("select", {}).get("options")
+                                opts = prop_payload.get("status", {}).get("options") or prop_payload.get(
+                                    "select", {}
+                                ).get("options")
                             if opts:
                                 allowed_options = [o.get("name", "").strip() for o in opts]
                         except Exception:
@@ -942,34 +945,48 @@ class NotionPublisher:
                                 if prop_type in ("select", "status"):
                                     logging.info("Adding missing Status option '%s' to database schema", desired_norm)
                                     # Retrieve existing options payload
-                                    options_payload = prop_payload.get(prop_type, {}).get("options", []) if prop_payload.get(prop_type) else []
+                                    options_payload = (
+                                        prop_payload.get(prop_type, {}).get("options", [])
+                                        if prop_payload.get(prop_type)
+                                        else []
+                                    )
                                     # Append new option
                                     options_payload.append({"name": desired_norm})
-                                    update_payload = {"properties": {"Status": {prop_type: {"options": options_payload}}}}
+                                    update_payload = {
+                                        "properties": {"Status": {prop_type: {"options": options_payload}}}
+                                    }
                                     try:
                                         # Attempt to update the database schema to include the new option
                                         self.client.databases.update(self.config.database_id, **update_payload)
                                         # Refresh db_props
                                         db_props = self._get_database_properties()
                                         logging.info("Status option upserted; retrying publish")
-                                        response = self.client.pages.create(parent=parent, properties=properties, children=blocks[:100])
+                                        response = self.client.pages.create(
+                                            parent=parent, properties=properties, children=blocks[:100]
+                                        )
                                         last_exc = None
                                         break
                                     except Exception:
-                                        logging.exception("Failed to upsert Status option; will fallback to minimal create")
+                                        logging.exception(
+                                            "Failed to upsert Status option; will fallback to minimal create"
+                                        )
                             except Exception:
                                 logging.exception("Status option upsert attempt failed")
                         # If types mismatch, try alternate representation
                         if prop_type == "status" and "select" in properties["Status"]:
                             properties["Status"] = {"status": {"name": properties["Status"]["select"]["name"]}}
                             logging.info("Retrying with Status as 'status' type")
-                            response = self.client.pages.create(parent=parent, properties=properties, children=blocks[:100])
+                            response = self.client.pages.create(
+                                parent=parent, properties=properties, children=blocks[:100]
+                            )
                             last_exc = None
                             break
                         elif prop_type == "select" and "status" in properties["Status"]:
                             properties["Status"] = {"select": {"name": properties["Status"]["status"]["name"]}}
                             logging.info("Retrying with Status as 'select' type")
-                            response = self.client.pages.create(parent=parent, properties=properties, children=blocks[:100])
+                            response = self.client.pages.create(
+                                parent=parent, properties=properties, children=blocks[:100]
+                            )
                             last_exc = None
                             break
                 except Exception:
@@ -1066,6 +1083,23 @@ class NotionPublisher:
         except Exception:
             meta, body = {}, content
 
+        # ══════════════════════════════════════════════════════════════════════════════
+        # DEDUPLICATION CHECK: Check if file already has notion_page_id in frontmatter
+        # ══════════════════════════════════════════════════════════════════════════════
+        existing_page_id = meta.get("notion_page_id")
+        existing_sync_status = meta.get("sync_status", "pending")
+
+        # If already synced and not forcing, skip
+        if existing_page_id and existing_sync_status == "synced" and not force:
+            return {
+                "page_id": existing_page_id,
+                "url": f"https://notion.so/{existing_page_id.replace('-', '')}",
+                "type": meta.get("type", doc_type or "notes"),
+                "tags": meta.get("tags", []),
+                "skipped": True,
+                "reason": "already_synced_frontmatter",
+            }
+
         # Compute a deterministic strong fingerprint (title + frontmatter + normalized body)
         try:
             title_for_hash = None
@@ -1134,7 +1168,9 @@ class NotionPublisher:
                 # Attempt to claim the document by registering/upserting as in_progress
                 try:
                     # Register the document lifecycle using the computed fingerprint
-                    db.register_document(normalized_path, doc_type or "notes", status="in_progress", content_hash=file_hash)
+                    db.register_document(
+                        normalized_path, doc_type or "notes", status="in_progress", content_hash=file_hash
+                    )
                 except Exception:
                     pass
             except Exception:
@@ -1166,8 +1202,8 @@ class NotionPublisher:
                 if DB_AVAILABLE:
                     try:
                         db = get_db()
-                        doc_life = db.get_document_status(str(path)) if 'path' in locals() else None
-                        if doc_life and doc_life.get('status') == 'draft' and not force:
+                        doc_life = db.get_document_status(str(path)) if "path" in locals() else None
+                        if doc_life and doc_life.get("status") == "draft" and not force:
                             return {
                                 "page_id": "",
                                 "url": "",
@@ -1264,6 +1300,7 @@ class NotionPublisher:
             # Extract title from H1 or filename
             h1_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
             title = h1_match.group(1).strip() if h1_match else filename.replace(".md", "").replace("_", " ")
+
             # Sanitize title: strip HTML tags and unescape entities to avoid corrupted Notion titles
             def _sanitize_title(s: str) -> str:
                 if not s:
@@ -1278,16 +1315,34 @@ class NotionPublisher:
                     return s
 
             title = _sanitize_title(title)
-            result = self.publish(title=title, content=content, doc_type=doc_type, tags=tags, filename=filename, dry_run=dry_run)
+            result = self.publish(
+                title=title, content=content, doc_type=doc_type, tags=tags, filename=filename, dry_run=dry_run
+            )
 
             # Record the sync in the database, using the strong fingerprint when available
             if DB_AVAILABLE:
                 db = get_db()
                 try:
-                    db.record_notion_sync(str(path), result["page_id"], result["url"], result.get("type", "notes"), file_hash=file_hash)
+                    db.record_notion_sync(
+                        str(path), result["page_id"], result["url"], result.get("type", "notes"), file_hash=file_hash
+                    )
                 except TypeError:
                     # Older DB manager without optional param - fall back
                     db.record_notion_sync(str(path), result["page_id"], result["url"], result.get("type", "notes"))
+
+            # ══════════════════════════════════════════════════════════════════════════════
+            # UPDATE SOURCE FILE: Mark file as synced with notion_page_id in frontmatter
+            # ══════════════════════════════════════════════════════════════════════════════
+            if not dry_run and result.get("page_id"):
+                try:
+                    from scripts.frontmatter import mark_synced as fm_mark_synced
+
+                    updated_content = fm_mark_synced(content, filename, result["page_id"])
+                    path.write_text(updated_content, encoding="utf-8")
+                    logging.info("Updated source file %s with notion_page_id=%s", path, result["page_id"])
+                except Exception as e:
+                    logging.warning("Failed to update source file with notion_page_id: %s", e)
+
         finally:
             try:
                 lock.release()
@@ -1468,8 +1523,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Allow CLI toggle to override environment
-    if getattr(args, 'no_notion', False):
-        globals()['_DISABLE_NOTION_PUBLISH'] = True
+    if getattr(args, "no_notion", False):
+        globals()["_DISABLE_NOTION_PUBLISH"] = True
 
     try:
         if args.test:

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Digest Bot - Discord Bot Core
 #  Copyright (c) 2025 SIRIUS Alpha
@@ -69,6 +70,7 @@ except ImportError:
 if DISCORD_AVAILABLE and getattr(commands, "Bot", None):
     BotBase = commands.Bot
 else:
+
     class _DummyBot:
         """Fallback base class used when discord.py is not installed. Allows importing without raising at module import time."""
 
@@ -78,6 +80,7 @@ else:
     BotBase = _DummyBot
 
 from ..config import Config, get_config
+from .content_router import ContentType, detect_content_type, get_router
 from .self_guide import SelfGuide, ServerBlueprint
 from .self_healer import HealthState, SelfHealer
 
@@ -173,9 +176,17 @@ class DigestDiscordBot(BotBase):
         self._digest_channel: Optional[discord.TextChannel] = None
         self._log_channel: Optional[discord.TextChannel] = None
 
+        # Content Routing
+        self.router = get_router()
+
         # Setup tracking
         self._setup_complete = False
         self._last_digest_date: Optional[date] = None
+
+    @property
+    def _bot(self) -> DigestDiscordBot:
+        """Compatibility property for cogs using self.bot._bot"""
+        return self
 
     # ══════════════════════════════════════════════════════════════════════════
     # LIFECYCLE EVENTS
@@ -191,14 +202,15 @@ class DigestDiscordBot(BotBase):
         # Register recommended cogs (reporting, alerts, moderation, pins, etc.)
         try:
             from .cogs import (
-                reporting,
-                digest_workflow,
-                sanitizer_alerts,
-                moderation,
                 alerting,
-                subscriptions,
+                digest_workflow,
+                moderation,
                 pins,
+                reporting,
                 resources,
+                sanitizer_alerts,
+                status,
+                subscriptions,
             )
 
             # Add cogs idempotently to avoid duplicate command registration on reconnect
@@ -211,6 +223,7 @@ class DigestDiscordBot(BotBase):
                 subscriptions.SubscriptionsCog,
                 pins.PinsCog,
                 resources.ResourcesCog,
+                status.Status,
             ]
 
             for cog_cls in cogs_to_add:
@@ -338,43 +351,40 @@ class DigestDiscordBot(BotBase):
         self._setup_complete = True
 
     async def _cache_channels(self) -> None:
-        """Cache important channels."""
+        """
+        Cache important channels.
+
+        Note: We primarily use the content router now, but some legacy
+        code may still rely on these cached attributes.
+        """
         if not self._guild:
             return
 
-        # Find digest channel
-        self._digest_channel = discord.utils.get(self._guild.text_channels, name="📊-daily-digests")
-        if not self._digest_channel:
-            self._digest_channel = self.guide.get_channel("📊-daily-digests")
+        # Use router to find channels
+        self._digest_channel = await self.router.get_channel(self._guild, ContentType.DIGEST)
+        self._log_channel = await self.router.get_channel(self._guild, ContentType.BOT_LOG)
+        self._reports_channel = await self.router.get_channel(self._guild, ContentType.SYSTEM_REPORT)
+        self._commands_codex_channel = await self.router.get_channel(self._guild, ContentType.BOT_COMMAND)
 
-        # Find log channel
-        self._log_channel = discord.utils.get(self._guild.text_channels, name="🤖-bot-logs")
-        if not self._log_channel:
-            self._log_channel = self.guide.get_channel("🤖-bot-logs")
-
-        # Find admin reports channel
-        self._reports_channel = discord.utils.get(self._guild.text_channels, name="📥-reports")
-        if not self._reports_channel:
-            self._reports_channel = self.guide.get_channel("📥-reports")
-
-        # Find public command codex
-        self._commands_codex_channel = discord.utils.get(self._guild.text_channels, name="📋-bot-commands")
-        if not self._commands_codex_channel:
-            self._commands_codex_channel = self.guide.get_channel("📋-bot-commands")
-
-        logger.info(f"Cached channels: " f"digest={self._digest_channel}, " f"log={self._log_channel}, reports={self._reports_channel}")
+        logger.info("Cached channels via router.")
 
     # ══════════════════════════════════════════════════════════════════════════
     # MESSAGING
     # ══════════════════════════════════════════════════════════════════════════
 
     async def _log_to_channel(self, message: str) -> None:
-        """Send log message to bot logs channel."""
-        if self._log_channel:
+        """Send log message to bot logs channel (via router)."""
+        if not self._guild:
+            return
+
+        channel = await self.router.get_channel(self._guild, ContentType.BOT_LOG)
+        if channel:
             try:
-                await self._log_channel.send(message)
+                await channel.send(message)
+                self.router.mark_channel_healthy(channel.name)
             except Exception as e:
                 logger.error(f"Failed to log to channel: {e}")
+                self.router.mark_channel_unhealthy(channel.name)
 
     async def post_digest(
         self,
@@ -383,53 +393,36 @@ class DigestDiscordBot(BotBase):
     ) -> Optional[discord.Message]:
         """
         Post a digest to the digests channel.
-
-        Args:
-            content: Digest content
-            embed: Optional embed
-
-        Returns:
-            Posted message or None
         """
-        if not self._digest_channel:
-            logger.warning("No digest channel available")
-            return None
+        return await self.post_content(content=content, embed=embed, content_type=ContentType.DIGEST)
 
-        try:
-            if embed:
-                msg = await self._digest_channel.send(content, embed=embed)
-            else:
-                msg = await self._digest_channel.send(content)
-
-            logger.info(f"Posted digest to {self._digest_channel.name}")
-            return msg
-
-        except Exception as e:
-            logger.error(f"Failed to post digest: {e}")
-            self.healer.health.record_error(f"Digest post failed: {e}")
-            return None
-
-    async def post_report(
+    async def post_content(
         self,
-        title: str,
         content: str,
         embed: Optional[discord.Embed] = None,
+        content_type: Optional[ContentType] = None,
+        filename: Optional[str] = None,
+        doc_type: Optional[str] = None,
         attachments: Optional[list] = None,
     ) -> Optional[discord.Message]:
         """
-        Post an administrative report to the reports channel (admin inbox).
+        Post content to the appropriate channel using the router.
 
-        Args:
-            title: Short title for the report
-            content: Report body
-            embed: Optional embed
-            attachments: Optional list of file paths to attach
-
-        Returns:
-            Posted message or None
+        Detects content type if not provided.
         """
-        if not self._reports_channel:
-            logger.warning("No reports channel available")
+        if not self._guild:
+            logger.warning("No guild available for posting")
+            return None
+
+        # Detect content type if not provided
+        if not content_type:
+            content_type = detect_content_type(filename=filename, doc_type=doc_type, content=content)
+            logger.info("Detected content type: %s", content_type.name)
+
+        # Get channel from router
+        channel = await self.router.get_channel(self._guild, content_type)
+        if not channel:
+            logger.warning("No channel found for content type: %s", content_type.name)
             return None
 
         try:
@@ -441,20 +434,35 @@ class DigestDiscordBot(BotBase):
                     except Exception as e:
                         logger.warning(f"Failed to attach file {path}: {e}")
 
-            body = f"**{title}**\n{content}"
-
             if embed:
-                msg = await self._reports_channel.send(body, embed=embed, files=files or None)
+                msg = await channel.send(content, embed=embed, files=files or None)
             else:
-                msg = await self._reports_channel.send(body, files=files or None)
+                msg = await channel.send(content, files=files or None)
 
-            logger.info(f"Posted report to {self._reports_channel.name}")
+            logger.info(f"Posted {content_type.name} to {channel.name}")
+            self.router.mark_channel_healthy(channel.name)
             return msg
 
         except Exception as e:
-            logger.error(f"Failed to post report: {e}")
-            self.healer.health.record_error(f"Report post failed: {e}")
+            logger.error(f"Failed to post {content_type.name}: {e}")
+            self.healer.health.record_error(f"{content_type.name} post failed: {e}")
+            self.router.mark_channel_unhealthy(channel.name)
             return None
+
+    async def post_report(
+        self,
+        title: str,
+        content: str,
+        embed: Optional[discord.Embed] = None,
+        attachments: Optional[list] = None,
+    ) -> Optional[discord.Message]:
+        """
+        Post an administrative report to the reports channel (admin inbox).
+        """
+        body = f"**{title}**\n{content}"
+        return await self.post_content(
+            content=body, embed=embed, content_type=ContentType.SYSTEM_REPORT, attachments=attachments
+        )
 
     def create_digest_embed(
         self,
@@ -567,7 +575,7 @@ class DigestDiscordBot(BotBase):
                     with Summarizer(self.config) as summarizer:
                         return summarizer.generate(status, today)
 
-                result = await __import__('asyncio').to_thread(_generate_sync)
+                result = await __import__("asyncio").to_thread(_generate_sync)
 
                 if result.success:
                     # Write to file
@@ -593,8 +601,9 @@ class DigestDiscordBot(BotBase):
 
                     # Fallback: use deterministic, DB-based report to ensure something useful posts
                     try:
-                        from ..daily_report import build_report
                         from db_manager import DatabaseManager
+
+                        from ..daily_report import build_report
 
                         logger.info("Attempting deterministic fallback digest from DB")
                         db = DatabaseManager()
@@ -810,7 +819,9 @@ class DigestDiscordBot(BotBase):
             )
             await interaction.response.send_message(embed=embed)
 
-        @self.tree.command(name="publish_changelog", description="Publish changelog into the resources channel and pin it (operators)")
+        @self.tree.command(
+            name="publish_changelog", description="Publish changelog into the resources channel and pin it (operators)"
+        )
         @app_commands.checks.has_permissions(manage_messages=True)
         async def publish_changelog_cmd(interaction: discord.Interaction):
             await interaction.response.defer()
@@ -838,11 +849,15 @@ class DigestDiscordBot(BotBase):
                     ch = discord.utils.get(interaction.guild.text_channels, name="📚-resources")
 
                 if not ch:
-                    await interaction.followup.send("Resources channel not found; run `/setup` or create `📚-resources`.", ephemeral=True)
+                    await interaction.followup.send(
+                        "Resources channel not found; run `/setup` or create `📚-resources`.", ephemeral=True
+                    )
                     return
 
                 file = discord.File(io.BytesIO(content.encode("utf-8")), filename="CHANGELOG.md")
-                msg = await ch.send(f"📣 **Changelog published**\n{first_heading or 'Full changelog attached.'}", file=file)
+                msg = await ch.send(
+                    f"📣 **Changelog published**\n{first_heading or 'Full changelog attached.'}", file=file
+                )
                 try:
                     await msg.pin(reason="Published changelog via slash command")
                 except Exception:
@@ -852,7 +867,9 @@ class DigestDiscordBot(BotBase):
             except Exception as e:
                 await interaction.followup.send(f"Failed to publish changelog: {e}", ephemeral=True)
 
-        @self.tree.command(name="pin_commands", description="Post and pin the public command guide into resources channel (operators)")
+        @self.tree.command(
+            name="pin_commands", description="Post and pin the public command guide into resources channel (operators)"
+        )
         @app_commands.checks.has_permissions(manage_messages=True)
         async def pin_commands_cmd(interaction: discord.Interaction):
             await interaction.response.defer()
