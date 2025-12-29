@@ -3,12 +3,12 @@
 
 Polls the `llm_tasks` table and processes pending tasks using the configured LLM provider.
 """
+
+import logging
 import os
 import sys
 import time
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -19,6 +19,7 @@ from scripts.frontmatter import add_frontmatter, detect_type
 # Optional Notion publish
 try:
     from scripts.notion_publisher import NotionPublisher
+
     NOTION_AVAILABLE = True
 except Exception:
     NOTION_AVAILABLE = False
@@ -47,51 +48,22 @@ def process_task(task: dict, cfg: Config) -> None:
         task_type = task.get("task_type", "generate")
 
         if task_type == "generate":
-            provider_hint = task.get("provider_hint")
+            # Honor provider_hint when present, but allow fallback for gemini_only
+            # if the user wants true bulletproof local-first operation.
+            # In 'gemini_only' mode, we still use create_llm_provider but
+            # we can pass the hint if we really want to restrict it,
+            # but here we prefer the robust global fallback.
+            provider = create_llm_provider(cfg, LOG)
+            if not provider:
+                raise RuntimeError("No LLM provider available")
 
-            # Honor provider_hint when present
-            if provider_hint == "gemini_only":
-                try:
-                    from main import GeminiProvider
-
-                    gem = GeminiProvider(cfg.GEMINI_MODEL)
-                    resp = gem.generate_content(prompt)
-                    text = getattr(resp, "text", str(resp))
-                except Exception as e:
-                    LOG.exception("Gemini-only generation failed for task %s: %s", task_id, e)
-                    # Mark task failed (no fallback per 'gemini_only' contract)
-                    db.update_llm_task_result(task_id, "failed", response=None, error=str(e), attempts=attempts)
-                    return
-
-            elif provider_hint in ("ollama_slow", "ollama_offload"):
-                try:
-                    # Use the digest-bot Ollama provider which accepts a custom timeout
-                    from digest_bot.llm.ollama import OllamaProvider as OllamaSlowProvider
-
-                    ol = OllamaSlowProvider(host=cfg.OLLAMA_HOST, model=cfg.OLLAMA_MODEL, timeout=None)
-                    resp = ol.generate(prompt)
-                    text = getattr(resp, "text", str(resp))
-                except Exception as e:
-                    LOG.exception("Ollama slow generation failed for task %s: %s", task_id, e)
-                    if attempts >= MAX_RETRIES:
-                        db.update_llm_task_result(task_id, "failed", response=None, error=str(e), attempts=attempts)
-                    else:
-                        db.update_llm_task_result(task_id, "pending", response=None, error=str(e), attempts=attempts)
-                    return
-
-            else:
-                provider = create_llm_provider(cfg, LOG)
-                if not provider:
-                    raise RuntimeError("No LLM provider available")
-
-                # Perform generation with a local timeout (worker enforces wall time)
-                # Provider-level timeouts are respected (OLLAMA_TIMEOUT_S, etc.).
-                resp = provider.generate_content(prompt)
-                text = getattr(resp, "text", str(resp))
+            resp = provider.generate_content(prompt)
+            text = getattr(resp, "text", str(resp))
 
             # Sanitize generated content using canonical values embedded in prompt
             def _parse_canonical_from_prompt(p: str):
                 import re
+
                 values = {}
                 # Look for lines like: '* GOLD: $4362.4'
                 for m in re.finditer(r"\*\s*([A-Z]+)\s*:\s*\$?([0-9\.,]+)", p):
@@ -102,6 +74,7 @@ def process_task(task: dict, cfg: Config) -> None:
 
             def _sanitize_text(text: str, canonical: dict):
                 import re
+
                 corrected = 0
                 notes = []
 
@@ -110,6 +83,7 @@ def process_task(task: dict, cfg: Config) -> None:
                     full = match.group(0)
                     # Tolerate trailing punctuation (e.g., '98.72.'), strip commas, and sanitize
                     import re as _re
+
                     raw = match.group(2).replace(",", "")
                     clean = _re.sub(r"[^0-9.\-]", "", raw)
                     try:
@@ -125,7 +99,6 @@ def process_task(task: dict, cfg: Config) -> None:
                     return full
 
                 # For each canonical asset, replace nearby mentions (handle plural and different casings)
-                import re
 
                 for asset, price in canonical.items():
                     # Build likely token variants so 'YIELD' matches 'Yields' in natural text
@@ -135,10 +108,20 @@ def process_task(task: dict, cfg: Config) -> None:
 
                     for tok in variants:
                         # Replace patterns like 'Gold: $1234' or 'gold ... $1234' where the token appears
-                        text = re.sub(rf"(\b{re.escape(tok)}\b[^\n]{{0,40}}\$)([0-9\.,]+)", lambda m, p=price: _replace_price(m, p), text, flags=re.IGNORECASE)
+                        text = re.sub(
+                            rf"(\b{re.escape(tok)}\b[^\n]{{0,40}}\$)([0-9\.,]+)",
+                            lambda m, p=price: _replace_price(m, p),
+                            text,
+                            flags=re.IGNORECASE,
+                        )
 
                         # Replace 'Current Gold Price: $1234' pattern for variants too
-                        text = re.sub(rf"(Current\s+{re.escape(tok)}\s+Price:\s*\$)\s*[0-9\.,]+", lambda m, p=price: m.group(1) + str(p), text, flags=re.IGNORECASE)
+                        text = re.sub(
+                            rf"(Current\s+{re.escape(tok)}\s+Price:\s*\$)\s*[0-9\.,]+",
+                            lambda m, p=price: m.group(1) + str(p),
+                            text,
+                            flags=re.IGNORECASE,
+                        )
 
                 return text, corrected, notes
 
@@ -173,12 +156,16 @@ def process_task(task: dict, cfg: Config) -> None:
                 try:
                     # Write sanitized content to file, but mark status as flagged
                     doc_type = detect_type(os.path.basename(doc_path))
-                    final_content = add_frontmatter(sanitized_text, os.path.basename(doc_path), doc_type=doc_type, ai_processed=True)
+                    final_content = add_frontmatter(
+                        sanitized_text, os.path.basename(doc_path), doc_type=doc_type, ai_processed=True
+                    )
                     # add a flag in frontmatter
                     final_content = final_content.replace("\n---\n", "\n---\nsanitizer_flagged: true\n", 1)
                     with open(doc_path, "w", encoding="utf-8") as f:
                         f.write(final_content)
-                    db.update_llm_task_result(task_id, "flagged", response=sanitized_text, error=None, attempts=attempts)
+                    db.update_llm_task_result(
+                        task_id, "flagged", response=sanitized_text, error=None, attempts=attempts
+                    )
                 except Exception as e:
                     LOG.exception("Failed to write flagged report for %s: %s", doc_path, e)
                     db.update_llm_task_result(task_id, "failed", response=None, error=str(e), attempts=attempts)
@@ -187,7 +174,9 @@ def process_task(task: dict, cfg: Config) -> None:
             # Write sanitized content to file and update frontmatter
             try:
                 doc_type = detect_type(os.path.basename(doc_path))
-                final_content = add_frontmatter(sanitized_text, os.path.basename(doc_path), doc_type=doc_type, ai_processed=True)
+                final_content = add_frontmatter(
+                    sanitized_text, os.path.basename(doc_path), doc_type=doc_type, ai_processed=True
+                )
                 with open(doc_path, "w", encoding="utf-8") as f:
                     f.write(final_content)
             except Exception as e:
@@ -222,7 +211,9 @@ def process_task(task: dict, cfg: Config) -> None:
                 if actions:
                     db.save_action_insights(actions)
 
-                db.update_llm_task_result(task_id, "completed", response=f"insights:{len(actions)}", error=None, attempts=attempts)
+                db.update_llm_task_result(
+                    task_id, "completed", response=f"insights:{len(actions)}", error=None, attempts=attempts
+                )
                 LOG.info("Task %s completed (insights) - actions=%s", task_id, len(actions))
             except Exception as e:
                 LOG.exception("Insights extraction failed for %s: %s", doc_path, e)
@@ -234,7 +225,9 @@ def process_task(task: dict, cfg: Config) -> None:
 
         else:
             LOG.warning("Unknown task_type '%s' for task %s", task_type, task_id)
-            db.update_llm_task_result(task_id, "failed", response=None, error=f"unknown task_type {task_type}", attempts=attempts)
+            db.update_llm_task_result(
+                task_id, "failed", response=None, error=f"unknown task_type {task_type}", attempts=attempts
+            )
             return
     except Exception as e:
         LOG.exception("LLM generation failed for task %s: %s", task_id, e)
@@ -243,6 +236,7 @@ def process_task(task: dict, cfg: Config) -> None:
         else:
             # Re-queue (backoff could be added)
             db.update_llm_task_result(task_id, "pending", response=None, error=str(e), attempts=attempts)
+
 
 def main():
     # Metrics integration (optional)

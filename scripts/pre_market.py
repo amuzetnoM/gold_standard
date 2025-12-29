@@ -24,7 +24,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
@@ -111,7 +112,11 @@ def build_premarket_prompt(
     vix = data.get("VIX", {}).get("price", "N/A")
 
     # Add an explicit canonical values block to prevent fabricated numbers
-    canonical_lines = [f"* {k}: ${v.get('price', 'N/A')} (change: {v.get('change', 0):+.2f}%)" for k, v in data.items() if k != 'RATIOS' and isinstance(v, dict)]
+    canonical_lines = [
+        f"* {k}: ${v.get('price', 'N/A')} (change: {v.get('change', 0):+.2f}%)"
+        for k, v in data.items()
+        if k != "RATIOS" and isinstance(v, dict)
+    ]
 
     canonical_block = "\n".join(canonical_lines)
 
@@ -258,9 +263,9 @@ def generate_premarket(config: Config, logger, model=None, dry_run: bool = False
                 from db_manager import get_db
 
                 db = get_db()
-                # Enforce Gemini-only for premarket generation tasks
-                task_id = db.add_llm_task(report_path, prompt, provider_hint='gemini_only', task_type='generate')
-                logger.info(f"Enqueued LLM task {task_id} for {report_path} (provider_hint=gemini_only)")
+                # Use standard provider hint or None to respect global config
+                task_id = db.add_llm_task(report_path, prompt, provider_hint=None, task_type="generate")
+                logger.info(f"Enqueued LLM task {task_id} for {report_path}")
             except Exception as e:
                 logger.warning(f"Failed to enqueue LLM task, falling back to inline generation: {e}")
                 # fallback to inline generation
@@ -276,20 +281,19 @@ def generate_premarket(config: Config, logger, model=None, dry_run: bool = False
                 # Prefer using the provided model (useful for tests and injected providers)
                 try:
                     response = model.generate_content(prompt)
-                    generated = getattr(response, 'text', None)
+                    generated = getattr(response, "text", None)
                 except Exception:
                     generated = None
 
-                # If the provided model did not generate, fall back to strict Gemini attempt
+                # If the provided model did not generate, use global fallback logic
                 if not generated:
-                    from main import GeminiProvider
-
                     try:
-                        gem = GeminiProvider(config.GEMINI_MODEL)
-                        response = gem.generate_content(prompt)
-                        generated = response.text
+                        provider = create_llm_provider(config, logger)
+                        if provider:
+                            response = provider.generate_content(prompt)
+                            generated = response.text
                     except Exception as ge:
-                        logger.error(f"Gemini generation failed for premarket (strict): {ge}")
+                        logger.error(f"Fallback generation failed for premarket: {ge}")
                         # Fall back to non-AI skeleton to avoid partial/hallucinated content
                         md.append(_generate_skeleton_premarket(data, week_info, cortex))
                         generated = None
@@ -309,7 +313,9 @@ def generate_premarket(config: Config, logger, model=None, dry_run: bool = False
 
                         # Replace explicit 'Current Gold Price' mentions
                         if gold_price is not None:
-                            text = re.sub(r"(Current Gold Price:\s*\$)\s*[0-9\.,]+", f"\1{gold_price}", text, flags=re.IGNORECASE)
+                            text = re.sub(
+                                r"(Current Gold Price:\s*\$)\s*[0-9\.,]+", f"\1{gold_price}", text, flags=re.IGNORECASE
+                            )
 
                             # Replace nearby mentions where gold is referenced with a $<number> if it is off by >5%
                             def fix_match(m):
@@ -327,6 +333,7 @@ def generate_premarket(config: Config, logger, model=None, dry_run: bool = False
 
                         # Enforce canonical prices for all known assets to prevent accidental mis-attribution
                         try:
+
                             def enforce_canonical(text: str) -> str:
                                 # For each asset in the data dict, replace nearby $numbers with the canonical price
                                 for asset_key, v in data.items():
@@ -343,7 +350,9 @@ def generate_premarket(config: Config, logger, model=None, dry_run: bool = False
 
                                     for tok in variants:
                                         # Match constructs like 'DXY ($98.72)' or 'rising Yields ($98.72)'
-                                        pattern = re.compile(rf"({re.escape(tok)}[^\n]{{0,40}}\$)\s*[0-9\.,]+", flags=re.IGNORECASE)
+                                        pattern = re.compile(
+                                            rf"({re.escape(tok)}[^\n]{{0,40}}\$)\s*[0-9\.,]+", flags=re.IGNORECASE
+                                        )
 
                                         def _repl(m):
                                             return m.group(1) + f"{asset_price}"
@@ -351,7 +360,9 @@ def generate_premarket(config: Config, logger, model=None, dry_run: bool = False
                                         text = pattern.sub(_repl, text)
 
                                     # As a fallback, also replace explicit 'Asset: $number' patterns where asset key appears
-                                    fallback = re.compile(rf"({re.escape(asset_key)}\s*:\s*\$)\s*[0-9\.,]+", flags=re.IGNORECASE)
+                                    fallback = re.compile(
+                                        rf"({re.escape(asset_key)}\s*:\s*\$)\s*[0-9\.,]+", flags=re.IGNORECASE
+                                    )
 
                                     text = fallback.sub(lambda m: m.group(1) + f"{asset_price}", text)
 
@@ -404,7 +415,7 @@ def _generate_skeleton_premarket(data: Dict[str, Any], week_info: Dict[str, Any]
 
     # Compute stop loss string safely
     try:
-        if gold_price != 'N/A':
+        if gold_price != "N/A":
             stop_loss_val = float(gold_price) - (float(gold_atr) * 2)
             stop_loss_str = f"${stop_loss_val:.0f}"
         else:
