@@ -53,14 +53,13 @@ These changes are recorded here so the remaining recommendations can be prioriti
         *   Push new images to a container registry.
         *   Update and restart systemd services.
 
-## 4. Application Monitoring & Self-Healing
+## 4. Application Monitoring & Self-Healing (IMPLEMENTED)
 
 *   **Internal Application Health Checks**:
-    *   **Improvement**: Expand the `gost` container's `HEALTHCHECK` (and potentially add internal Python checks) to perform more granular application-level checks, such as verifying database connectivity or the ability to reach external APIs (yfinance, Gemini, Notion).
-    *   **Rationale**: Provides a more accurate status of application readiness and functionality beyond just container uptime.
+    *   **Status**: **Done**. `scripts/system_health_report.py` now provides deep granular health metrics (DB, Services, Timers, LLM).
 *   **Automatic Error Reporting**:
-    *   **Improvement**: Integrate a dedicated tool for automatic error reporting (e.g., Sentry, Bugsnag).
-    *   **Rationale**: Captures and categorizes unhandled exceptions and critical errors, providing immediate visibility and insights into recurring issues, allowing for faster debugging and resolution.
+    *   **Status**: **Done**. `syndicate_sentinel.py` monitors system state and performs self-healing (restarts services, resets stuck tasks).
+    *   **Next Step**: Integrate Discord alerting for Sentinel actions.
 
 ## 5. Data Integrity & Archiving
 

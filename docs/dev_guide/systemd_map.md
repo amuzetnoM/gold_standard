@@ -68,7 +68,28 @@ These are the core executable units defining the actions performed by the system
 *   **Logging**: Standard output and error are redirected to `/home/ali_shakil_backup/syndicate_config/cleanup.log`.
 *   **Trigger**: Activated by `syndicate-weekly-cleanup.timer`.
 
+### 2.4. `syndicate-sentinel.service`
+
+*   **Description**: The "Watchdog" of the system. Monitors health, restarts failed components, and unjams stuck tasks.
+*   **Unit File Location**: `syndicate/deploy/systemd/normalized/syndicate-sentinel.service`
+*   **Purpose**: Self-healing and automated recovery.
+*   **Execution Command**:
+    ```bash
+    ExecStart=.../python scripts/syndicate_sentinel.py
+    ```
+
+### 2.5. `syndicate-llm-worker.service`
+
+*   **Description**: Dedicated consumer for the `llm_tasks` database queue.
+*   **Unit File Location**: `syndicate/deploy/systemd/normalized/syndicate-llm-worker.service`
+*   **Purpose**: Decouples CPU-intensive AI generation from the main daemon, allowing for asynchronous, parallel processing.
+*   **Execution Command**:
+    ```bash
+    ExecStart=.../python scripts/llm_worker.py
+    ```
+
 ## 3. Systemd Timers
+
 
 These units define the schedule on which the associated services are activated.
 

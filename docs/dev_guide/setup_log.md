@@ -119,3 +119,24 @@ As of **2025-12-13 01:47:16**, the `syndicate` system is configured and operatio
 The `syndicate` system is now fully prepared to run autonomously as intended.
 *   The `systemd` services will trigger the `syndicate` application according to their schedules, with all data correctly stored on `/mnt/newdisk`.
 *   Further monitoring of system logs (`/mnt/newdisk/syndicate/syndicate_config/run.log` and `cleanup.log`) is recommended to confirm long-term stability and functionality.
+
+## 7. Phase 8: Autonomous Sentinel & Stabilization (2025-12-30)
+
+### 7.1. Critical Architecture Fixes
+*   **Scoping Crash (`run.py`)**: ADDRESSED. A critical `NameError` crash in the daemon's publishing logic was fixed by correctly scoping `run_publishing_once`.
+*   **AI Queue Stalls**: ADDRESSED. Tasks were stuck in `pending` because the daemon single-threaded loop wasn't consuming them fast enough. Deployed `syndicate-llm-worker.service` as a dedicated parallel consumer.
+*   **Pre-Market Quality**: ADDRESSED. `pre_market.py` logic updated to force AI usage, preventing "skeleton" reports.
+
+### 7.2. New Infrastructure
+*   **`syndicate-sentinel.service`**: A "Watchdog" service that runs every 5 minutes (via loop) to:
+    *   Restart crashed services.
+    *   Reset "stuck" LLM tasks (orphaned > 30m).
+    *   Perform database integrity checks.
+*   **`syndicate-llm-worker.service`**: A dedicated worker consuming from `llm_tasks` queue, decoupling generation from the main daemon loop.
+
+### 7.3. Current Layout
+The system now runs entirely "hands-off" with the following active units:
+1.  `syndicate-daemon`: Core orchestration & scheduling.
+2.  `syndicate-discord`: Bot interface & notifications.
+3.  `syndicate-sentinel`: Deployment health & self-healing.
+4.  `syndicate-llm-worker`: Dedicated AI compute worker.
