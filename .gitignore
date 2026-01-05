@@ -254,6 +254,7 @@ logs/
 .env
 .env.*
 !.env.example
+!.env.vercel.example
 secrets.py
 secrets.json
 *.pem
