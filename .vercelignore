@@ -1,0 +1,99 @@
+# Vercel Ignore Configuration
+# Exclude files that are not needed for deployment
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Database files (use external database for production)
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+
+# Output and logs
+output/
+logs/
+*.log
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Docker files (not needed for Vercel)
+Dockerfile
+docker-compose.yml
+.dockerignore
+docker/
+
+# Scripts not needed for web deployment
+scripts/
+tools/
+backups/
+deploy/
+
+# Development and testing files
+.git/
+.github/
+.gitignore
+.pre-commit-config.yaml
+check_db_vm.py
+reset_db_vm.py
+test_*.py
+*.tmp
+*.temp
+*.bak
+
+# Local configuration
+.env
+.env.*
+!.env.example
+secrets.*
+cortex_memory.json
+cortex_memory.lock
+
+# System design and context files
+system-design/
+context.md
+cortex_memory.template.json
+MANIFEST.in
+Makefile
+setup.ps1
+setup.sh
+
+# Non-web components
+main.py
+run.py
+gui.py
+db_manager.py
+deploy_systemd_vm.sh
+
+# Source files not needed for web UI
+src/
+!src/__init__.py

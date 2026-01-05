@@ -1,0 +1,28 @@
+{
+  "name": "syndicate",
+  "version": "3.7.0",
+  "description": "Syndicate - Autonomous precious metals intelligence system with AI-powered analysis",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'Python build completed'",
+    "deploy": "vercel --prod"
+  },
+  "keywords": [
+    "gold",
+    "trading",
+    "analysis",
+    "ai",
+    "precious-metals",
+    "finance"
+  ],
+  "author": "amuzetnoM",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amuzetnoM/syndicate.git"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
