@@ -1,0 +1,55 @@
+{
+  "version": 2,
+  "name": "syndicate",
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "web_ui/static/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/static/(.*)",
+      "dest": "/web_ui/static/$1"
+    },
+    {
+      "src": "/favicon.ico",
+      "dest": "/web_ui/static/images/favicon.ico"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "api/index.py"
+    }
+  ],
+  "env": {
+    "FLASK_ENV": "production",
+    "WEB_UI_HOST": "0.0.0.0",
+    "WEB_UI_PORT": "5000"
+  },
+  "regions": ["iad1"],
+  "functions": {
+    "api/index.py": {
+      "memory": 3008,
+      "maxDuration": 60
+    }
+  },
+  "headers": [
+    {
+      "source": "/static/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ]
+}

@@ -292,3 +292,12 @@ tmp/
 temp/
 twine-draft.txt
 docker-data/
+
+# -----------------------------------------------------------------------------
+# Vercel
+# -----------------------------------------------------------------------------
+.vercel
+.vercel_build_output/
+node_modules/
+package-lock.json
+yarn.lock
